@@ -293,7 +293,7 @@ static void node_read_task(void *arg)
                 char msg[256] = {0};
                 sprintf(&msg, "{\"src_addr\":\"" MACSTR "\",\"data\":{\"cmd\":\"restart\",\"data\":\"ok\"}}",
                         MAC2STR(sta_mac));
-                mwifi_write(NULL, &data_type, "", 29, true);
+                mwifi_write(NULL, &data_type, msg, strlen(msg), true);
                 vTaskDelay(pdMS_TO_TICKS(3000));
                 esp_restart();
             }
@@ -327,7 +327,7 @@ static void node_read_task(void *arg)
                     MAC2STR(sta_mac), json_cmd->valuestring, data);
             mwifi_write(NULL, &data_type, msg, strlen(msg), true);
         }
-        //cJSON_Delete(json_root);
+        cJSON_Delete(json_root);
     }
 
     MDF_LOGW("Note read task is exit");
