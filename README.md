@@ -33,7 +33,7 @@ static void node_read_task(void *arg)
 
 ### 格式
 
-使用json格式
+使用json格式（在处理代码里图方便直接用字符串了，可以用cJSON制作）
 
 #### 发送
 
@@ -59,3 +59,6 @@ static void node_read_task(void *arg)
 
 data表示获取bin文件的地址，无"data"时使用默认地址。
 
+编译完成后，可以`cd build`到build目录下，
+
+使用`python -m http.server 8070`便捷的http服务进行OTA升级操作。

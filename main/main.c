@@ -290,7 +290,10 @@ static void node_read_task(void *arg)
             {
                 MDF_LOGI("Restart the version of the switching device");
                 MDF_LOGW("The device will restart after 3 seconds");
-                mwifi_write(NULL, &data_type, "{\"cmd\":\"restart\",\"data\":\"ok\"}", 29, true);
+                char msg[256] = {0};
+                sprintf(&msg, "{\"src_addr\":\"" MACSTR "\",\"data\":{\"cmd\":\"restart\",\"data\":\"ok\"}}",
+                        MAC2STR(sta_mac));
+                mwifi_write(NULL, &data_type, "", 29, true);
                 vTaskDelay(pdMS_TO_TICKS(3000));
                 esp_restart();
             }
