@@ -315,6 +315,11 @@ static void node_read_task(void *arg)
                                 NULL, 5, NULL);
                     sprintf(data, "%s", "start");
                 }
+                else
+                {
+                    sprintf(data, "%s", "i am not root");
+                }
+                
             }
             /*
             else if (!strcmp(json_cmd->valuestring, "ws2812"))
