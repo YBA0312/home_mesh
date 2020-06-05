@@ -18,10 +18,51 @@ static int g_sockfd = -1;
 static const char *TAG = "Home mesh";
 char OTA_FileUrl[255] = "http://192.168.1.53:8070/ota.bin";
 
+static void iv_18(void *arg)
+{
+    gpio_pad_select_gpio(IV_18_DIN);
+    // gpio_set_pull_mode(IV_18_DIN, GPIO_PULLDOWN_ONLY);
+    gpio_set_direction(IV_18_DIN, GPIO_MODE_OUTPUT);
+    gpio_pad_select_gpio(IV_18_CLK);
+    // gpio_set_pull_mode(IV_18_CLK, GPIO_PULLDOWN_ONLY);
+    gpio_set_direction(IV_18_CLK, GPIO_MODE_OUTPUT);
+    gpio_pad_select_gpio(IV_18_LOAD);
+    // gpio_set_pull_mode(IV_18_LOAD, GPIO_PULLDOWN_ONLY);
+    gpio_set_direction(IV_18_LOAD, GPIO_MODE_OUTPUT);
+    while (1)
+    {
+        int cur = 1;
+        for (int n = 0; n < 20; n++)
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                // gpio_set_level(IV_18_DIN, (cur >> i) & 1);
+                // gpio_set_level(IV_18_CLK, 1);
+                // gpio_set_level(IV_18_DIN, (cur >> i) & 1);
+                // gpio_set_level(IV_18_CLK, 0);
+                GPIO.out_w1ts = (((cur >> i) & 1) << IV_18_DIN);
+                vTaskDelay(1);
+                GPIO.out_w1ts = (1 << IV_18_CLK);
+                vTaskDelay(1);
+                GPIO.out_w1tc = (((cur >> i) & 1) << IV_18_DIN);
+                GPIO.out_w1tc = (1 << IV_18_CLK);
+            }
+            // gpio_set_level(IV_18_LOAD, 1);
+            // gpio_set_level(IV_18_LOAD, 0);
+            GPIO.out_w1ts = (1 << IV_18_LOAD);
+            vTaskDelay(1);
+            GPIO.out_w1tc = (1 << IV_18_LOAD);
+            cur = cur << 1;
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+        }
+    }
+    vTaskDelete(NULL);
+}
+
 /**
  * @brief Create a tcp client
  */
-int socket_tcp_client_create(const char *ip, uint16_t port)
+static int socket_tcp_client_create(const char *ip, uint16_t port)
 {
     MDF_PARAM_CHECK(ip);
 
@@ -53,7 +94,7 @@ ERR_EXIT:
     return -1;
 }
 
-void tcp_client_read_task(void *arg)
+static void tcp_client_read_task(void *arg)
 {
     mdf_err_t ret = MDF_OK;
     char *data = MDF_MALLOC(MWIFI_PAYLOAD_LEN);
@@ -154,7 +195,7 @@ void tcp_client_read_task(void *arg)
     vTaskDelete(NULL);
 }
 
-void tcp_client_write_task(void *arg)
+static void tcp_client_write_task(void *arg)
 {
     mdf_err_t ret = MDF_OK;
     char *data = MDF_CALLOC(1, MWIFI_PAYLOAD_LEN);
@@ -319,7 +360,6 @@ static void node_read_task(void *arg)
                 {
                     sprintf(data, "%s", "i am not root");
                 }
-                
             }
             /*
             else if (!strcmp(json_cmd->valuestring, "ws2812"))
@@ -693,4 +733,6 @@ void app_main()
     TimerHandle_t timer = xTimerCreate("print_system_info", 10000 / portTICK_RATE_MS,
                                        true, NULL, print_system_info_timercb);
     xTimerStart(timer, 0);
+
+    xTaskCreate(iv_18, "iv_18", 4 * 1024, NULL, 0, NULL);
 }
