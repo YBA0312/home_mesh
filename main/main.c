@@ -21,40 +21,70 @@ char OTA_FileUrl[255] = "http://192.168.1.53:8070/ota.bin";
 static void iv_18(void *arg)
 {
     gpio_pad_select_gpio(IV_18_DIN);
-    // gpio_set_pull_mode(IV_18_DIN, GPIO_PULLDOWN_ONLY);
+    gpio_set_pull_mode(IV_18_DIN, GPIO_PULLDOWN_ONLY);
     gpio_set_direction(IV_18_DIN, GPIO_MODE_OUTPUT);
     gpio_pad_select_gpio(IV_18_CLK);
-    // gpio_set_pull_mode(IV_18_CLK, GPIO_PULLDOWN_ONLY);
+    gpio_set_pull_mode(IV_18_CLK, GPIO_PULLDOWN_ONLY);
     gpio_set_direction(IV_18_CLK, GPIO_MODE_OUTPUT);
     gpio_pad_select_gpio(IV_18_LOAD);
-    // gpio_set_pull_mode(IV_18_LOAD, GPIO_PULLDOWN_ONLY);
+    gpio_set_pull_mode(IV_18_LOAD, GPIO_PULLDOWN_ONLY);
     gpio_set_direction(IV_18_LOAD, GPIO_MODE_OUTPUT);
+    const uint8_t number[10] = {0xBB, 0x12, 0xAE, 0xB6, 0x17, 0xB5, 0xBD, 0x92, 0xBF, 0xB7};
+    const uint8_t show[8] = {0x80, 0x01, 0x40, 0x02, 0x20, 0x04, 0x08, 0x10};
+    int num = 12345678;
+    int c;
+    uint32_t data;
+    //******
+    uint8_t G[8];
+
     while (1)
     {
-        int cur = 1;
-        for (int n = 0; n < 20; n++)
+        for (int a = 0; a < 100; ++a)
         {
-            for (int i = 0; i < 20; i++)
+            c = num;
+            //*************
+            // memset(G, 0, 8);
+            // for (int i = 0; i < 8; i++)
+            // {
+            //     G[i] = number[c % 10];
+            //     c = c / 10;
+            //     if (c == 0)
+            //     {
+            //         break;
+            //     }
+            // }
+            // for (int i = 0; i < 8; i++)
+            // {
+                
+            //     for (int j = 0; j < 8; j++)
+            //     {
+            //         if (G[i] == G[])
+            //     }
+            // }
+            //**************
+            for (int n = 0; n < 8; n++)
             {
-                // gpio_set_level(IV_18_DIN, (cur >> i) & 1);
-                // gpio_set_level(IV_18_CLK, 1);
-                // gpio_set_level(IV_18_DIN, (cur >> i) & 1);
-                // gpio_set_level(IV_18_CLK, 0);
-                GPIO.out_w1ts = (((cur >> i) & 1) << IV_18_DIN);
+                data = show[n] << 8 | number[c % 10];
+                for (int i = 0; i < 17; i++)
+                {
+                    GPIO.out_w1ts = (((data >> i) & 1) << IV_18_DIN);
+                    GPIO.out_w1ts = (1 << IV_18_CLK);
+                    GPIO.out_w1tc = (((data >> i) & 1) << IV_18_DIN);
+                    GPIO.out_w1tc = (1 << IV_18_CLK);
+                }
+                GPIO.out_w1ts = (1 << IV_18_LOAD);
                 vTaskDelay(1);
-                GPIO.out_w1ts = (1 << IV_18_CLK);
+                GPIO.out_w1tc = (1 << IV_18_LOAD);
                 vTaskDelay(1);
-                GPIO.out_w1tc = (((cur >> i) & 1) << IV_18_DIN);
-                GPIO.out_w1tc = (1 << IV_18_CLK);
+                c = c / 10;
+                if (c == 0)
+                {
+                    break;
+                }
             }
-            // gpio_set_level(IV_18_LOAD, 1);
-            // gpio_set_level(IV_18_LOAD, 0);
-            GPIO.out_w1ts = (1 << IV_18_LOAD);
-            vTaskDelay(1);
-            GPIO.out_w1tc = (1 << IV_18_LOAD);
-            cur = cur << 1;
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
         }
+        num++;
+        // vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
     vTaskDelete(NULL);
 }
