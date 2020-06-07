@@ -46,7 +46,7 @@ static void iv_18(void *arg)
         for (int i = 0; i < 8; i++)
         {
             num_bit = number[c % 10];
-            for (num_cur = 0; num_cur < i; num_cur++)
+            for (num_cur = 0; num_cur < data_cur; num_cur++)
             {
                 if (num_bit == (data[num_cur] & 0xFF))
                 {
@@ -54,7 +54,7 @@ static void iv_18(void *arg)
                     break;
                 }
             }
-            if (num_cur == i)
+            if (num_cur == data_cur)
             {
                 data[data_cur++] = show[i] << 8 | num_bit;
             }
