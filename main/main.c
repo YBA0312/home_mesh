@@ -35,7 +35,7 @@ static void iv_18(void *arg)
     int c;
     uint32_t data[8];
     uint8_t data_cur;
-    uint8_t num_bit[8];
+    uint8_t num_bit;
     uint8_t num_cur;
 
     while (1)
@@ -45,10 +45,10 @@ static void iv_18(void *arg)
         data_cur = 0;
         for (int i = 0; i < 8; i++)
         {
-            num_bit[i] = number[c % 10];
+            num_bit = number[c % 10];
             for (num_cur = 0; num_cur < i; num_cur++)
             {
-                if (num_bit[i] == num_bit[num_cur])
+                if (num_bit == (data[num_cur] & 0xFF))
                 {
                     data[num_cur] |= show[i] << 8;
                     break;
@@ -56,7 +56,7 @@ static void iv_18(void *arg)
             }
             if (num_cur == i)
             {
-                data[data_cur++] = show[i] << 8 | num_bit[i];
+                data[data_cur++] = show[i] << 8 | num_bit;
             }
             c = c / 10;
             if (c == 0)
