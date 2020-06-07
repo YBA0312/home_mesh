@@ -31,56 +31,55 @@ static void iv_18(void *arg)
     gpio_set_direction(IV_18_LOAD, GPIO_MODE_OUTPUT);
     const uint8_t number[10] = {0xBB, 0x12, 0xAE, 0xB6, 0x17, 0xB5, 0xBD, 0x92, 0xBF, 0xB7};
     const uint8_t show[8] = {0x80, 0x01, 0x40, 0x02, 0x20, 0x04, 0x08, 0x10};
-    int num = 12345678;
+    int num = 19990312;
     int c;
-    uint32_t data;
-    //******
-    uint8_t G[8];
+    uint32_t data[8];
+    uint8_t data_cur;
+    uint8_t num_bit[8];
+    uint8_t num_cur;
 
     while (1)
     {
+        //************************************
+        c = num;
+        data_cur = 0;
+        for (int i = 0; i < 8; i++)
+        {
+            num_bit[i] = number[c % 10];
+            for (num_cur = 0; num_cur < i; num_cur++)
+            {
+                if (num_bit[i] == num_bit[num_cur])
+                {
+                    data[num_cur] |= show[i] << 8;
+                    break;
+                }
+            }
+            if (num_cur == i)
+            {
+                data[data_cur++] = show[i] << 8 | num_bit[i];
+            }
+            c = c / 10;
+            if (c == 0)
+            {
+                break;
+            }
+        }
+        //************************************
         for (int a = 0; a < 100; ++a)
         {
-            c = num;
-            //*************
-            // memset(G, 0, 8);
-            // for (int i = 0; i < 8; i++)
-            // {
-            //     G[i] = number[c % 10];
-            //     c = c / 10;
-            //     if (c == 0)
-            //     {
-            //         break;
-            //     }
-            // }
-            // for (int i = 0; i < 8; i++)
-            // {
-                
-            //     for (int j = 0; j < 8; j++)
-            //     {
-            //         if (G[i] == G[])
-            //     }
-            // }
-            //**************
-            for (int n = 0; n < 8; n++)
+            for (int n = 0; n < data_cur; n++)
             {
-                data = show[n] << 8 | number[c % 10];
                 for (int i = 0; i < 17; i++)
                 {
-                    GPIO.out_w1ts = (((data >> i) & 1) << IV_18_DIN);
+                    GPIO.out_w1ts = (((data[n] >> i) & 1) << IV_18_DIN);
                     GPIO.out_w1ts = (1 << IV_18_CLK);
-                    GPIO.out_w1tc = (((data >> i) & 1) << IV_18_DIN);
+                    GPIO.out_w1tc = (((data[n] >> i) & 1) << IV_18_DIN);
                     GPIO.out_w1tc = (1 << IV_18_CLK);
                 }
                 GPIO.out_w1ts = (1 << IV_18_LOAD);
                 vTaskDelay(1);
                 GPIO.out_w1tc = (1 << IV_18_LOAD);
                 vTaskDelay(1);
-                c = c / 10;
-                if (c == 0)
-                {
-                    break;
-                }
             }
         }
         num++;
