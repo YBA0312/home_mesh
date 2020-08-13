@@ -2,7 +2,7 @@
  * @Author       : YBA
  * @Date         : 2020-04-01 08:45:39
  * @LastEditors  : YBA
- * @LastEditTime : 2020-06-05 12:24:30
+ * @LastEditTime : 2020-08-13 09:58:10
  * @Description  : https://www.klyn-tech.com/
  * @FilePath     : /home_mesh/main/main.h
  * @Version      : 0.0.0
@@ -25,10 +25,6 @@
 #define CONFIG_SERVER_IP "192.168.1.53"
 #define CONFIG_SERVER_PORT 8080
 
-#define IV_18_DIN 25
-#define IV_18_CLK 26
-#define IV_18_LOAD 27
-
 
 static void ota_task();
 
@@ -39,7 +35,6 @@ static void tcp_client_write_task(void *arg);
 static void root_read_task(void *arg);
 static void node_read_task(void *arg);
 static void node_write_task(void *arg);
-static void iv_18(void *arg);
 
 static void print_system_info_timercb(void *timer);
 static mdf_err_t wifi_init();

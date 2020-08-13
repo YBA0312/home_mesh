@@ -18,76 +18,6 @@ static int g_sockfd = -1;
 static const char *TAG = "Home mesh";
 char OTA_FileUrl[255] = "http://192.168.1.53:8070/ota.bin";
 
-static void iv_18(void *arg)
-{
-    gpio_pad_select_gpio(IV_18_DIN);
-    gpio_set_pull_mode(IV_18_DIN, GPIO_PULLDOWN_ONLY);
-    gpio_set_direction(IV_18_DIN, GPIO_MODE_OUTPUT);
-    gpio_pad_select_gpio(IV_18_CLK);
-    gpio_set_pull_mode(IV_18_CLK, GPIO_PULLDOWN_ONLY);
-    gpio_set_direction(IV_18_CLK, GPIO_MODE_OUTPUT);
-    gpio_pad_select_gpio(IV_18_LOAD);
-    gpio_set_pull_mode(IV_18_LOAD, GPIO_PULLDOWN_ONLY);
-    gpio_set_direction(IV_18_LOAD, GPIO_MODE_OUTPUT);
-    const uint8_t number[10] = {0xBB, 0x12, 0xAE, 0xB6, 0x17, 0xB5, 0xBD, 0x92, 0xBF, 0xB7};
-    const uint8_t show[8] = {0x80, 0x01, 0x40, 0x02, 0x20, 0x04, 0x08, 0x10};
-    int num = 19990312;
-    int c;
-    uint32_t data[8];
-    uint8_t data_cur;
-    uint8_t num_bit;
-    uint8_t num_cur;
-
-    while (1)
-    {
-        //************************************
-        c = num;
-        data_cur = 0;
-        for (int i = 0; i < 8; i++)
-        {
-            num_bit = number[c % 10];
-            for (num_cur = 0; num_cur < data_cur; num_cur++)
-            {
-                if (num_bit == (data[num_cur] & 0xFF))
-                {
-                    data[num_cur] |= show[i] << 8;
-                    break;
-                }
-            }
-            if (num_cur == data_cur)
-            {
-                data[data_cur++] = show[i] << 8 | num_bit;
-            }
-            c = c / 10;
-            if (c == 0)
-            {
-                break;
-            }
-        }
-        //************************************
-        for (int a = 0; a < 100; ++a)
-        {
-            for (int n = 0; n < data_cur; n++)
-            {
-                for (int i = 0; i < 17; i++)
-                {
-                    GPIO.out_w1ts = (((data[n] >> i) & 1) << IV_18_DIN);
-                    GPIO.out_w1ts = (1 << IV_18_CLK);
-                    GPIO.out_w1tc = (((data[n] >> i) & 1) << IV_18_DIN);
-                    GPIO.out_w1tc = (1 << IV_18_CLK);
-                }
-                GPIO.out_w1ts = (1 << IV_18_LOAD);
-                vTaskDelay(1);
-                GPIO.out_w1tc = (1 << IV_18_LOAD);
-                vTaskDelay(1);
-            }
-        }
-        num++;
-        // vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
-    vTaskDelete(NULL);
-}
-
 /**
  * @brief Create a tcp client
  */
@@ -762,6 +692,4 @@ void app_main()
     TimerHandle_t timer = xTimerCreate("print_system_info", 10000 / portTICK_RATE_MS,
                                        true, NULL, print_system_info_timercb);
     xTimerStart(timer, 0);
-
-    xTaskCreate(iv_18, "iv_18", 4 * 1024, NULL, 0, NULL);
 }
