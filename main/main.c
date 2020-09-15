@@ -900,11 +900,11 @@ static mdf_err_t wifi_init()
     tcpip_adapter_init();
     MDF_ERROR_ASSERT(esp_event_loop_init(NULL, NULL));
     MDF_ERROR_ASSERT(esp_wifi_init(&cfg));
+    esp_wifi_set_protocol(WIFI_MODE_STA, WIFI_PROTOCOL_11N);
+    esp_wifi_set_bandwidth(WIFI_MODE_STA, WIFI_BW_HT40);
     MDF_ERROR_ASSERT(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
     MDF_ERROR_ASSERT(esp_wifi_set_mode(WIFI_MODE_STA));
     MDF_ERROR_ASSERT(esp_wifi_set_ps(WIFI_PS_NONE));
-    MDF_ERROR_ASSERT(esp_wifi_set_protocol(WIFI_MODE_STA, WIFI_PROTOCOL_11N));
-    MDF_ERROR_ASSERT(esp_wifi_set_bandwidth(WIFI_MODE_STA, WIFI_BW_HT40));
     MDF_ERROR_ASSERT(esp_mesh_set_6m_rate(false));
     MDF_ERROR_ASSERT(esp_wifi_start());
 
