@@ -15,8 +15,297 @@
 #include "main.h"
 
 static int g_sockfd = -1;
+static int g_sockfd2 = -1;
 static const char *TAG = "Home mesh";
 char OTA_FileUrl[255] = "http://192.168.1.53:8070/ota.bin";
+static bool light = false;
+static bool sense = false;
+static bool oscilloscope_switch = false;
+static bool auto_light = true;
+static int adc = 0;
+
+static void LED_CONTROL(void *arg)
+{
+    int tick = 0;
+    char msg[256] = {0};
+    uint8_t sta_mac[MWIFI_ADDR_LEN] = {0};
+    esp_wifi_get_mac(ESP_IF_WIFI_STA, sta_mac);
+    mwifi_data_type_t data_type = {0x0};
+    while (1)
+    {
+        if (sense && auto_light)
+        {
+            sense = false;
+            tick = 0;
+            light = true;
+            // if (mwifi_is_connected())
+            // {
+            //     sprintf(msg, "{\"src_addr\":\"" MACSTR "\",\"model\":\"light\",\"data\":{\"status\":\"on\",\"adc\":\"%d\"}}",
+            //             MAC2STR(sta_mac), adc);
+            //     mwifi_write(NULL, &data_type, msg, strlen(msg), true);
+            // }
+        }
+        if (light && auto_light)
+        {
+            tick++;
+            if (tick > 300)
+            {
+                tick = 0;
+                light = false;
+                // if (mwifi_is_connected())
+                // {
+                //     sprintf(msg, "{\"src_addr\":\"" MACSTR "\",\"model\":\"light\",\"data\":{\"status\":\"off\",\"adc\":\"%d\"}}",
+                //             MAC2STR(sta_mac), adc);
+                //     mwifi_write(NULL, &data_type, msg, strlen(msg), true);
+                // }
+            }
+        }
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+    }
+    vTaskDelete(NULL);
+}
+
+static void LED_DAC(void *arg)
+{
+    uint8_t brightness = 255;
+    dac_output_enable(DAC_CHANNEL_2);
+    dac_output_voltage(DAC_CHANNEL_2, brightness);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+    while (1)
+    {
+        if (light && brightness < 255)
+        {
+            brightness = 255;
+            dac_output_voltage(DAC_CHANNEL_2, brightness);
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+        }
+        else if (!light && brightness > 0)
+        {
+            brightness = 0;
+            dac_output_voltage(DAC_CHANNEL_2, brightness);
+            vTaskDelay(20 / portTICK_PERIOD_MS);
+        }
+        else
+        {
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+        }
+    }
+    vTaskDelete(NULL);
+}
+
+static void LED_PWM(void *arg)
+{
+    uint8_t brightness = 0x1FFF;
+    ledc_timer_config_t ledc_timer = {
+        .duty_resolution = LEDC_TIMER_13_BIT, // resolution of PWM duty
+        .freq_hz = 5000,                      // frequency of PWM signal
+        .speed_mode = LEDC_HIGH_SPEED_MODE,   // timer mode
+        .timer_num = LEDC_TIMER_0             // timer index
+    };
+    ledc_timer_config(&ledc_timer);
+    ledc_channel_config_t ledc_channel = {
+        .channel = LEDC_CHANNEL_0,
+        .duty = brightness,
+        .gpio_num = GPIO_NUM_26,
+        .speed_mode = LEDC_HIGH_SPEED_MODE,
+        .hpoint = 0,
+        .timer_sel = LEDC_TIMER_0};
+    ledc_channel_config(&ledc_channel);
+    ledc_fade_func_install(0);
+    while (1)
+    {
+        if (light && brightness < 0x1FFF)
+        {
+            brightness = 0x1FFF;
+            ledc_set_fade_with_time(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, brightness, 500);
+            ledc_fade_start(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, LEDC_FADE_NO_WAIT);
+        }
+        else if (!light && brightness > 0)
+        {
+            brightness = 0;
+            ledc_set_fade_with_time(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, brightness, 500);
+            ledc_fade_start(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, LEDC_FADE_NO_WAIT);
+        }
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
+    vTaskDelete(NULL);
+}
+
+#define val_limit 32
+#define val_size 45
+int val_list[val_size];
+int val_list_sort[val_size];
+int val_list_cur = 0;
+
+int inc(const void *a, const void *b)
+{
+    return *(int *)a - *(int *)b;
+}
+
+static int filter_mid(int in)
+{
+    // int out = 0;
+    val_list[val_list_cur++] = in;
+    if (val_list_cur == val_size)
+    {
+        val_list_cur = 0;
+    }
+    memcpy(val_list_sort, val_list, sizeof(val_list));
+    qsort(val_list_sort, val_size, sizeof(val_list_sort[0]), inc);
+    // for (int i = 15; i < (val_size - 15); i++)
+    // {
+    //     out += val_list_sort[i];
+    // }
+    // return out / (val_size - 30);
+    return val_list_sort[(val_size - 1) / 2];
+}
+
+int val_mid = 3000;
+
+static int filter_process(int in)
+{
+    int out = abs(in - val_mid);
+    if (out < 256)
+    {
+        val_mid = (val_mid * 9 + in) / 10;
+        return val_mid;
+    }
+    return in;
+}
+
+int val_count = 0;
+int val_up_count = 0;
+int val_old = 0;
+
+static int filter_boundary(int in)
+{
+    if (in > val_old + 10)
+    {
+        val_up_count++;
+    }
+    else
+    {
+        val_up_count = 0;
+    }
+    if (in > val_limit)
+    {
+        val_count++;
+    }
+    else if (val_count > 0)
+    {
+        val_count--;
+    }
+    val_old = in;
+    if (val_count > val_limit / 2 && val_up_count > 4)
+    {
+        val_count = 0;
+        val_up_count = 0;
+        return in;
+    }
+    return 0;
+}
+
+static int filter_doubled(int in)
+{
+    return in * 2;
+}
+
+static void LED_ADC(void *arg)
+{
+    int val;
+    // ADC1
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+    while (1)
+    {
+        val = adc1_get_raw(ADC1_CHANNEL_6);
+        adc = val;
+        val = filter_mid(val);
+        val = filter_process(val);
+        val = filter_boundary(val);
+        // val = filter_doubled(val);
+        if (val > 128)
+        {
+            sense = true;
+        }
+        vTaskDelay(1);
+    }
+    vTaskDelete(NULL);
+}
+
+static void ADC2DAC(void *arg)
+{
+    int val;
+    // ADC1
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
+    // DAC2
+    dac_output_enable(DAC_CHANNEL_2);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+    while (1)
+    {
+        val = adc1_get_raw(ADC1_CHANNEL_6);
+        val = filter_mid(val);
+        val = filter_process(val);
+        val = filter_boundary(val);
+        val = filter_doubled(val);
+        val = (uint32_t)val * 255 / 4095;
+        dac_output_voltage(DAC_CHANNEL_2, (uint8_t)val);
+        vTaskDelay(1);
+    }
+    vTaskDelete(NULL);
+}
+
+static void oscilloscope(void *arg)
+{
+    mdf_err_t ret = MDF_OK;
+    int val;
+    uint8_t buff[1000];
+    // ADC1
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+    while (1)
+    {
+        if (g_sockfd2 == -1)
+        {
+            g_sockfd2 = socket_tcp_client_create("192.168.1.53", 9999);
+
+            if (g_sockfd2 == -1)
+            {
+                vTaskDelay(500 * portTICK_RATE_MS);
+                continue;
+            }
+        }
+        else
+        {
+            for (int i = 0; i < 200; i++)
+            {
+                val = adc1_get_raw(ADC1_CHANNEL_6);
+                // val = filter_mid(val);
+                val = filter_process(val);
+                // val = filter_boundary(val);
+                // val = filter_doubled(val);
+                if (val)
+                {
+                    sense = true;
+                }
+                buff[i] = (uint8_t)(val * 255 / 4095);
+                vTaskDelay(5);
+            }
+            ret = write(g_sockfd2, buff, 200);
+            if (ret <= 0)
+            {
+                MDF_LOGW("<%s> TCP read", strerror(errno));
+                close(g_sockfd2);
+                g_sockfd2 = -1;
+                continue;
+            }
+        }
+    }
+    vTaskDelete(NULL);
+}
 
 /**
  * @brief Create a tcp client
@@ -291,7 +580,7 @@ static void node_read_task(void *arg)
                 MDF_LOGI("Restart the version of the switching device");
                 MDF_LOGW("The device will restart after 3 seconds");
                 char msg[256] = {0};
-                sprintf(&msg, "{\"src_addr\":\"" MACSTR "\",\"data\":{\"cmd\":\"restart\",\"data\":\"ok\"}}",
+                sprintf(msg, "{\"src_addr\":\"" MACSTR "\",\"data\":{\"cmd\":\"restart\",\"data\":\"ok\"}}",
                         MAC2STR(sta_mac));
                 mwifi_write(NULL, &data_type, msg, strlen(msg), true);
                 vTaskDelay(pdMS_TO_TICKS(3000));
@@ -311,8 +600,7 @@ static void node_read_task(void *arg)
                     {
                         strcpy(OTA_FileUrl, json_data->valuestring);
                     }
-                    xTaskCreate(ota_task, "ota_task", 4 * 1024,
-                                NULL, 5, NULL);
+                    xTaskCreatePinnedToCore(ota_task, "ota_task", 4 * 1024, NULL, 5, NULL, 0);
                     sprintf(data, "%s", "start");
                 }
                 else
@@ -320,14 +608,43 @@ static void node_read_task(void *arg)
                     sprintf(data, "%s", "i am not root");
                 }
             }
-            /*
-            else if (!strcmp(json_cmd->valuestring, "ws2812"))
+            // else if (!strcmp(json_cmd->valuestring, "start function"))
+            // {
+            //     if (!strcmp(json_data->valuestring, "oscilloscope"))
+            //     {
+            //         xTaskCreatePinnedToCore(oscilloscope, "oscilloscope", 4 * 1024, NULL, 3, NULL, 1);
+            //     }
+            // }
+            else if (!strcmp(json_cmd->valuestring, "light"))
             {
-                ws2812_control(json_data);
+                if (!strcmp(json_data->valuestring, "blink"))
+                {
+                    auto_light = true;
+                    sense = true;
+                }
+                else if (!strcmp(json_data->valuestring, "on"))
+                {
+                    auto_light = false;
+                    light = true;
+                }
+                else if (!strcmp(json_data->valuestring, "off"))
+                {
+                    auto_light = false;
+                    light = false;
+                }
+                continue;
             }
-            */
+            else if (!strcmp(json_cmd->valuestring, "rollback"))
+            {
+                esp_ota_mark_app_invalid_rollback_and_reboot();
+                continue;
+            }
+            else
+            {
+                sprintf(data, "unknow cmd");
+            }
             char msg[256] = {0};
-            sprintf(&msg, "{\"src_addr\":\"" MACSTR "\",\"data\":{\"cmd\":\"%s\",\"data\":\"%s\"}}",
+            sprintf(msg, "{\"src_addr\":\"" MACSTR "\",\"data\":{\"cmd\":\"%s\",\"data\":\"%s\"}}",
                     MAC2STR(sta_mac), json_cmd->valuestring, data);
             mwifi_write(NULL, &data_type, msg, strlen(msg), true);
         }
@@ -518,6 +835,7 @@ EXIT:
  */
 static void print_system_info_timercb(void *timer)
 {
+    mdf_err_t ret = MDF_OK;
     uint8_t primary = 0;
     wifi_second_chan_t second = 0;
     mesh_addr_t parent_bssid = {0};
@@ -531,11 +849,22 @@ static void print_system_info_timercb(void *timer)
     esp_wifi_vnd_mesh_get(&mesh_assoc);
     esp_mesh_get_parent_bssid(&parent_bssid);
 
-    MDF_LOGI("System information, channel: %d, layer: %d, self mac: " MACSTR ", parent bssid: " MACSTR
-             ", parent rssi: %d, node num: %d, free heap: %u",
-             primary,
-             esp_mesh_get_layer(), MAC2STR(sta_mac), MAC2STR(parent_bssid.addr),
-             mesh_assoc.rssi, esp_mesh_get_total_node_num(), esp_get_free_heap_size());
+    char msg[256];
+    sprintf(msg, "System information, channel: %d, layer: %d, self mac: " MACSTR ", parent bssid: " MACSTR ", parent rssi: %d, node num: %d, free heap: %u",
+            primary, esp_mesh_get_layer(), MAC2STR(sta_mac), MAC2STR(parent_bssid.addr),
+            mesh_assoc.rssi, esp_mesh_get_total_node_num(), esp_get_free_heap_size());
+
+    if (g_sockfd)
+    {
+        ret = write(g_sockfd, msg, strlen(msg));
+        if (ret <= 0)
+        {
+            MDF_LOGW("<%s> TCP read", strerror(errno));
+            close(g_sockfd);
+            g_sockfd = -1;
+        }
+    }
+    // MDF_LOGI("%s", msg);
 
     for (int i = 0; i < wifi_sta_list.num; i++)
     {
@@ -574,6 +903,8 @@ static mdf_err_t wifi_init()
     MDF_ERROR_ASSERT(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
     MDF_ERROR_ASSERT(esp_wifi_set_mode(WIFI_MODE_STA));
     MDF_ERROR_ASSERT(esp_wifi_set_ps(WIFI_PS_NONE));
+    MDF_ERROR_ASSERT(esp_wifi_set_protocol(WIFI_MODE_STA, WIFI_PROTOCOL_11N));
+    MDF_ERROR_ASSERT(esp_wifi_set_bandwidth(WIFI_MODE_STA, WIFI_BW_HT40));
     MDF_ERROR_ASSERT(esp_mesh_set_6m_rate(false));
     MDF_ERROR_ASSERT(esp_wifi_start());
 
@@ -602,13 +933,11 @@ static mdf_err_t event_loop_cb(mdf_event_loop_t event, void *ctx)
         MDF_LOGI("Parent is connected on station interface");
         if (esp_mesh_get_layer() == MESH_ROOT_LAYER)
         {
-            xTaskCreate(root_read_task, "root_read_task", 4 * 1024,
-                        NULL, CONFIG_MDF_TASK_DEFAULT_PRIOTY, NULL);
+            xTaskCreatePinnedToCore(root_read_task, "root_read_task", 4 * 1024, NULL, 1/*CONFIG_MDF_TASK_DEFAULT_PRIOTY*/, NULL, 0);
         }
         /*xTaskCreate(node_write_task, "node_write_task", 4 * 1024,
             NULL, CONFIG_MDF_TASK_DEFAULT_PRIOTY, NULL);*/
-        xTaskCreate(node_read_task, "node_read_task", 4 * 1024,
-                    NULL, CONFIG_MDF_TASK_DEFAULT_PRIOTY, NULL);
+        xTaskCreatePinnedToCore(node_read_task, "node_read_task", 4 * 1024, NULL, 1/*CONFIG_MDF_TASK_DEFAULT_PRIOTY*/, NULL, 0);
 
         break;
 
@@ -626,8 +955,7 @@ static mdf_err_t event_loop_cb(mdf_event_loop_t event, void *ctx)
         MDF_LOGI("Root obtains the IP address. It is posted by LwIP stack automatically");
         /*xTaskCreate(tcp_client_write_task, "tcp_client_write_task", 4 * 1024,
                     NULL, CONFIG_MDF_TASK_DEFAULT_PRIOTY, NULL);*/
-        xTaskCreate(tcp_client_read_task, "tcp_server_read", 4 * 1024,
-                    NULL, CONFIG_MDF_TASK_DEFAULT_PRIOTY, NULL);
+        xTaskCreatePinnedToCore(tcp_client_read_task, "tcp_server_read", 4 * 1024, NULL, 1/*CONFIG_MDF_TASK_DEFAULT_PRIOTY*/, NULL, 0);
         break;
     }
 
@@ -654,6 +982,11 @@ static mdf_err_t event_loop_cb(mdf_event_loop_t event, void *ctx)
 
 void app_main()
 {
+    MDF_ERROR_ASSERT(mdf_event_loop_init(event_loop_cb));
+    MDF_ERROR_ASSERT(wifi_init());
+
+    uint8_t sta_mac[MWIFI_ADDR_LEN] = {0};
+    esp_wifi_get_mac(ESP_IF_WIFI_STA, sta_mac);
     mwifi_init_config_t cfg = MWIFI_INIT_CONFIG_DEFAULT();
     mwifi_config_t config = {
         .router_ssid = CONFIG_ROUTER_SSID,
@@ -661,6 +994,7 @@ void app_main()
         .mesh_id = CONFIG_MESH_ID,
         .mesh_password = CONFIG_MESH_PASSWORD,
     };
+    // snprintf((char *)&config.mesh_id[0], 6, "%03d%03d", sta_mac[4], sta_mac[5]);
 
     /**
      * @brief Set the log level for serial port printing.
@@ -671,9 +1005,8 @@ void app_main()
     /**
      * @brief Initialize wifi mesh.
      */
-    MDF_ERROR_ASSERT(mdf_event_loop_init(event_loop_cb));
-    MDF_ERROR_ASSERT(wifi_init());
     MDF_ERROR_ASSERT(mwifi_init(&cfg));
+    MDF_LOGI("MESH_ID : %s", config.mesh_id);
     MDF_ERROR_ASSERT(mwifi_set_config(&config));
     MDF_ERROR_ASSERT(mwifi_start());
 
@@ -692,4 +1025,16 @@ void app_main()
     TimerHandle_t timer = xTimerCreate("print_system_info", 10000 / portTICK_RATE_MS,
                                        true, NULL, print_system_info_timercb);
     xTimerStart(timer, 0);
+
+    // xTaskCreatePinnedToCore(ADC2DAC, "ADC2DAC", 4 * 1024, NULL, 3, NULL, 1);
+
+    // xTaskCreatePinnedToCore(LED_ADC, "LED_ADC", 4 * 1024, NULL, 3, NULL, 1);
+
+    xTaskCreatePinnedToCore(LED_CONTROL, "LED_CONTROL", 4 * 1024, NULL, 3, NULL, 1);
+
+    xTaskCreatePinnedToCore(LED_DAC, "LED_DAC", 1024, NULL, 3, NULL, 1);
+
+    // xTaskCreatePinnedToCore(oscilloscope, "oscilloscope", 4 * 1024, NULL, 3, NULL, 1);
+
+    // touch_pad_init();
 }
