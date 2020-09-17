@@ -2,7 +2,7 @@
  * @Author       : YBA
  * @Date         : 2020-04-01 08:45:39
  * @LastEditors  : YBA
- * @LastEditTime : 2020-09-15 15:04:15
+ * @LastEditTime : 2020-09-17 10:38:41
  * @Description  : https://www.klyn-tech.com/
  * @FilePath     : /home_mesh/main/main.h
  * @Version      : 0.0.0
@@ -21,9 +21,9 @@
 #include "driver/ledc.h"
 
 //#define BUF_SIZE (1024)
-#define VERSION "0.20"
-#define CONFIG_ROUTER_SSID "KLYNC"
-#define CONFIG_ROUTER_PASSWORD "qilinkeji3609"
+#define VERSION "0.24"
+#define CONFIG_ROUTER_SSID "ERROR"
+#define CONFIG_ROUTER_PASSWORD "19990312"
 #define CONFIG_MESH_ID "000001"
 #define CONFIG_MESH_PASSWORD "19990312"
 #define CONFIG_SERVER_IP "192.168.1.202"
