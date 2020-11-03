@@ -2,7 +2,7 @@
  * @Author       : YBA
  * @Date         : 2020-04-01 08:45:39
  * @LastEditors  : YBA
- * @LastEditTime : 2020-09-17 10:38:41
+ * @LastEditTime : 2020-09-25 12:25:13
  * @Description  : https://www.klyn-tech.com/
  * @FilePath     : /home_mesh/main/main.h
  * @Version      : 0.0.0
@@ -13,6 +13,10 @@
 #include "mdf_common.h"
 #include "mwifi.h"
 #include "mupgrade.h"
+#include "esp_bt.h"
+#include "mespnow.h"
+#include "mconfig_blufi.h"
+#include "mconfig_chain.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
 #include <driver/adc.h>
@@ -21,13 +25,20 @@
 #include "driver/ledc.h"
 
 //#define BUF_SIZE (1024)
-#define VERSION "0.24"
-#define CONFIG_ROUTER_SSID "ERROR"
-#define CONFIG_ROUTER_PASSWORD "19990312"
-#define CONFIG_MESH_ID "000001"
+#define VERSION "0.28"
+// #define CONFIG_ROUTER_SSID "kiku233"
+// #define CONFIG_ROUTER_PASSWORD "sanzhizhu7799"
+// #define CONFIG_MESH_ID "000001"
+// #define CONFIG_MESH_PASSWORD "19990312"
+// #define CONFIG_SERVER_IP "192.168.1.202"
+// #define CONFIG_SERVER_PORT 19393
+
+#define CONFIG_ROUTER_SSID "KLYNC"
+#define CONFIG_ROUTER_PASSWORD "qilinkeji3609"
+#define CONFIG_MESH_ID "000003"
 #define CONFIG_MESH_PASSWORD "19990312"
-#define CONFIG_SERVER_IP "192.168.1.202"
-#define CONFIG_SERVER_PORT 19393
+#define CONFIG_SERVER_IP "192.168.1.53"
+#define CONFIG_SERVER_PORT 8080
 
 
 static void ota_task();
