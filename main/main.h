@@ -2,7 +2,7 @@
  * @Author       : YBA
  * @Date         : 2020-04-01 08:45:39
  * @LastEditors  : YBA
- * @LastEditTime : 2020-09-25 12:25:13
+ * @LastEditTime : 2020-11-20 14:13:26
  * @Description  : https://www.klyn-tech.com/
  * @FilePath     : /home_mesh/main/main.h
  * @Version      : 0.0.0
@@ -33,12 +33,13 @@
 // #define CONFIG_SERVER_IP "192.168.1.202"
 // #define CONFIG_SERVER_PORT 19393
 
-#define CONFIG_ROUTER_SSID "KLYNC"
-#define CONFIG_ROUTER_PASSWORD "qilinkeji3609"
-#define CONFIG_MESH_ID "000003"
+#define CONFIG_ROUTER_SSID "kiku233"
+#define CONFIG_ROUTER_PASSWORD "sanzhizhu7799"
+#define CONFIG_MESH_ID "000312"
 #define CONFIG_MESH_PASSWORD "19990312"
-#define CONFIG_SERVER_IP "192.168.1.53"
-#define CONFIG_SERVER_PORT 8080
+#define CONFIG_DEVICE_TYPE 2
+#define CONFIG_SERVER_IP "cloud.yaoboan.com"
+#define CONFIG_SERVER_PORT 8032
 
 
 static void ota_task();

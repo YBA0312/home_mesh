@@ -24,22 +24,6 @@ static bool oscilloscope_switch = false;
 static bool auto_light = true;
 static int adc = 0;
 
-static void CC2530_RESTART(void *arg)
-{
-    uint8_t brightness = 255;
-    dac_output_enable(DAC_CHANNEL_2);
-    dac_output_voltage(DAC_CHANNEL_2, brightness);
-    vTaskDelay(10 / portTICK_PERIOD_MS);
-    while (1)
-    {
-        dac_output_voltage(DAC_CHANNEL_2, 255);
-        vTaskDelay(60000 / portTICK_PERIOD_MS);
-        dac_output_voltage(DAC_CHANNEL_2, 0);
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-    }
-    vTaskDelete(NULL);
-}
-
 static void LED_CONTROL(void *arg)
 {
     mdf_err_t ret = MDF_OK;
@@ -1049,33 +1033,6 @@ static void print_system_info_timercb(void *timer)
 #endif /**< MEMORY_DEBUG */
 }
 
-static mdf_err_t wifi_init()
-{
-    mdf_err_t ret = nvs_flash_init();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
-    {
-        MDF_ERROR_ASSERT(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-
-    MDF_ERROR_ASSERT(ret);
-
-    tcpip_adapter_init();
-    MDF_ERROR_ASSERT(esp_event_loop_init(NULL, NULL));
-    MDF_ERROR_ASSERT(esp_wifi_init(&cfg));
-    esp_wifi_set_protocol(WIFI_MODE_STA, WIFI_PROTOCOL_11N);
-    esp_wifi_set_bandwidth(WIFI_MODE_STA, WIFI_BW_HT40);
-    MDF_ERROR_ASSERT(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
-    MDF_ERROR_ASSERT(esp_wifi_set_mode(WIFI_MODE_STA));
-    // MDF_ERROR_ASSERT(esp_wifi_set_ps(WIFI_PS_NONE));
-    MDF_ERROR_ASSERT(esp_mesh_set_6m_rate(false));
-    MDF_ERROR_ASSERT(esp_wifi_start());
-
-    return MDF_OK;
-}
-
 /**
  * @brief All module events will be sent to this task in esp-mdf
  *
@@ -1176,50 +1133,50 @@ static mdf_err_t event_loop_cb(mdf_event_loop_t event, void *ctx)
     return MDF_OK;
 }
 
-void app_main()
+static mdf_err_t wifi_init()
 {
-    MDF_ERROR_ASSERT(mdf_event_loop_init(event_loop_cb));
-    MDF_ERROR_ASSERT(wifi_init());
+    mdf_err_t ret = nvs_flash_init();
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
 
-    uint8_t sta_mac[MWIFI_ADDR_LEN] = {0};
-    esp_wifi_get_mac(ESP_IF_WIFI_STA, sta_mac);
-    mwifi_init_config_t init_config = MWIFI_INIT_CONFIG_DEFAULT();
-    mwifi_config_t mwifi_config = {
-        .router_ssid = CONFIG_ROUTER_SSID,
-        .router_password = CONFIG_ROUTER_PASSWORD,
-        .mesh_id = CONFIG_MESH_ID,
-        .mesh_password = CONFIG_MESH_PASSWORD,
-        // .channel   = CONFIG_MESH_CHANNEL,
-        // .mesh_type = MWIFI_MESH_NODE,
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        MDF_ERROR_ASSERT(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+
+    MDF_ERROR_ASSERT(ret);
+
+    tcpip_adapter_init();
+    MDF_ERROR_ASSERT(esp_event_loop_init(NULL, NULL));
+    MDF_ERROR_ASSERT(esp_wifi_init(&cfg));
+    // esp_wifi_set_protocol(WIFI_MODE_STA, WIFI_PROTOCOL_11N);
+    // esp_wifi_set_bandwidth(WIFI_MODE_STA, WIFI_BW_HT40);
+    MDF_ERROR_ASSERT(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
+    MDF_ERROR_ASSERT(esp_wifi_set_mode(WIFI_MODE_STA));
+    // MDF_ERROR_ASSERT(esp_wifi_set_ps(WIFI_PS_NONE));
+    MDF_ERROR_ASSERT(esp_mesh_set_6m_rate(false));
+    MDF_ERROR_ASSERT(esp_wifi_start());
+
+    return MDF_OK;
+}
+
+static void my_mwifi_init()
+{
+    mwifi_init_config_t cfg = MWIFI_INIT_CONFIG_DEFAULT();
+    mwifi_config_t config   = {
+        .channel   = CONFIG_MESH_CHANNEL,
+        .mesh_id   = CONFIG_MESH_ID,
+        .mesh_type = CONFIG_DEVICE_TYPE,
     };
-
-    // snprintf((char *)&config.mesh_id[0], 6, "%03d%03d", sta_mac[4], sta_mac[5]);
-
-    /**
-     * @brief Set the log level for serial port printing.
-     */
-    esp_log_level_set("*", ESP_LOG_INFO);
-    esp_log_level_set(TAG, ESP_LOG_DEBUG);
-
-    // char name[28]        = {0x0};
-    // char custom_data[32] = {0x0};
-    // mwifi_config_t mwifi_config = {0x0};
-    // mwifi_init_config_t init_config = MWIFI_INIT_CONFIG_DEFAULT();
-    MDF_ERROR_ASSERT(mespnow_init());
-    // sprintf(name, "ESP-WIFI-MESH_%02x%02x", sta_mac[4], sta_mac[5]);
-    // MDF_ERROR_ASSERT(get_network_config(name, &mwifi_config, custom_data));
-    // MDF_ERROR_ASSERT(esp_bt_mem_release(ESP_BT_MODE_BLE));
-
     /**
      * @brief Initialize wifi mesh.
      */
-    MDF_ERROR_ASSERT(mwifi_init(&init_config));
-    MDF_LOGI("MESH_ID : %s", mwifi_config.mesh_id);
-    MDF_ERROR_ASSERT(mwifi_set_config(&mwifi_config));
+    MDF_ERROR_ASSERT(wifi_init());
+    MDF_ERROR_ASSERT(mwifi_init(&cfg));
+    MDF_ERROR_ASSERT(mwifi_set_config(&config));
     MDF_ERROR_ASSERT(mwifi_start());
 
-    //ws2812_control_init();
-
+    
     /**
      * @brief select/extend a group memebership here
      *      group id can be a custom address
@@ -1227,12 +1184,26 @@ void app_main()
     const uint8_t group_id_list[2][6] = {{0x01, 0x00, 0x5e, 0xae, 0xae, 0xae},
                                          {0x01, 0x00, 0x5e, 0xae, 0xae, 0xaf}};
 
-    MDF_ERROR_ASSERT(esp_mesh_set_group_id((mesh_addr_t *)group_id_list,
-                                           sizeof(group_id_list) / sizeof(group_id_list[0])));
+    MDF_ERROR_ASSERT(esp_mesh_set_group_id((mesh_addr_t *)group_id_list, 
+                                sizeof(group_id_list)/sizeof(group_id_list[0])));
+}
 
-    TimerHandle_t timer = xTimerCreate("print_system_info", 10000 / portTICK_RATE_MS,
-                                       true, NULL, print_system_info_timercb);
-    xTimerStart(timer, 0);
+void app_main()
+{
+    MDF_ERROR_ASSERT(mdf_event_loop_init(event_loop_cb));
+    MDF_ERROR_ASSERT(wifi_init());
+
+    /**
+     * @brief Set the log level for serial port printing.
+     */
+    esp_log_level_set("*", ESP_LOG_INFO);
+    esp_log_level_set(TAG, ESP_LOG_DEBUG);
+
+    MDF_ERROR_ASSERT(mespnow_init());
+
+    // TimerHandle_t timer = xTimerCreate("print_system_info", 10000 / portTICK_RATE_MS,
+    //                                    true, NULL, print_system_info_timercb);
+    // xTimerStart(timer, 0);
 
     // xTaskCreatePinnedToCore(ADC2DAC, "ADC2DAC", 4 * 1024, NULL, 3, NULL, 1);
 
@@ -1242,9 +1213,8 @@ void app_main()
 
     // xTaskCreatePinnedToCore(LED_DAC, "LED_DAC", 1024, NULL, 3, NULL, 1);
 
-    xTaskCreatePinnedToCore(oscilloscope, "oscilloscope", 4 * 1024, NULL, 3, NULL, 1);
+    // xTaskCreatePinnedToCore(oscilloscope, "oscilloscope", 4 * 1024, NULL, 3, NULL, 1);
 
-    xTaskCreatePinnedToCore(CC2530_RESTART, "CC2530_RESTART", 4 * 1024, NULL, 3, NULL, 1);
+    // xTaskCreatePinnedToCore(CC2530_RESTART, "CC2530_RESTART", 4 * 1024, NULL, 3, NULL, 1);
 
-    // touch_pad_init();
 }
