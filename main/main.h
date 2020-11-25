@@ -2,7 +2,7 @@
  * @Author       : YBA
  * @Date         : 2020-04-01 08:45:39
  * @LastEditors  : YBA
- * @LastEditTime : 2020-11-20 14:13:26
+ * @LastEditTime : 2020-11-25 15:39:00
  * @Description  : https://www.klyn-tech.com/
  * @FilePath     : /home_mesh/main/main.h
  * @Version      : 0.0.0
@@ -37,7 +37,6 @@
 #define CONFIG_ROUTER_PASSWORD "sanzhizhu7799"
 #define CONFIG_MESH_ID "000312"
 #define CONFIG_MESH_PASSWORD "19990312"
-#define CONFIG_DEVICE_TYPE 2
 #define CONFIG_SERVER_IP "cloud.yaoboan.com"
 #define CONFIG_SERVER_PORT 8032
 
