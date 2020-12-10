@@ -2,7 +2,7 @@
  * @Author       : YBA
  * @Date         : 2020-04-01 08:45:39
  * @LastEditors  : YBA
- * @LastEditTime : 2020-12-10 17:11:16
+ * @LastEditTime : 2020-12-10 19:05:39
  * @Description  : https://www.klyn-tech.com/
  * @FilePath     : /home_mesh/main/main.h
  * @Version      : 0.0.0
@@ -25,7 +25,7 @@
 #include "driver/ledc.h"
 
 //#define BUF_SIZE (1024)
-#define VERSION "1.0.1"
+#define VERSION "1.0.2"
 #define CONFIG_ROUTER_SSID "kiku233"
 #define CONFIG_ROUTER_PASSWORD "sanzhizhu7799"
 // #define CONFIG_MESH_ID "000001"

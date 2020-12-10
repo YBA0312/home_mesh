@@ -1356,8 +1356,8 @@ static void my_mwifi_init()
 
     // if (my_mesh_type == MWIFI_MESH_ROOT)
 
-    xTaskCreatePinnedToCore(root_read_task, "root_read_task", 4 * 1024, NULL, 3 /*CONFIG_MDF_TASK_DEFAULT_PRIOTY*/, NULL, 1);
-    xTaskCreatePinnedToCore(node_read_task, "node_read_task", 4 * 1024, NULL, 3 /*CONFIG_MDF_TASK_DEFAULT_PRIOTY*/, NULL, 1);
+    // xTaskCreatePinnedToCore(root_read_task, "root_read_task", 4 * 1024, NULL, 3 /*CONFIG_MDF_TASK_DEFAULT_PRIOTY*/, NULL, 1);
+    // xTaskCreatePinnedToCore(node_read_task, "node_read_task", 4 * 1024, NULL, 3 /*CONFIG_MDF_TASK_DEFAULT_PRIOTY*/, NULL, 1);
 }
 
 static void LED_INIT()
