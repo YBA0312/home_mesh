@@ -17,7 +17,7 @@
 static int g_sockfd = -1;
 static const char *TAG = "Home mesh";
 char OTA_FileUrl[255] = "http://192.168.1.53:8070/ota.bin";
-mwifi_node_type_t my_mesh_type = MWIFI_MESH_NODE;
+mwifi_node_type_t my_mesh_type = MWIFI_MESH_ROOT;
 uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 static char esp_now_recv_data[256] = {0};
 static size_t esp_now_recv_len = 0;
@@ -336,14 +336,14 @@ static void uart1_rx_task()
     memset(&data_type, 0, sizeof(data_type));
     while (1)
     {
-        const int rxBytes = uart_read_bytes(UART_NUM_1, data, RX_BUF_SIZE, 10 / portTICK_RATE_MS);
+        const int rxBytes = uart_read_bytes(UART_NUM_0, data, RX_BUF_SIZE, 10 / portTICK_RATE_MS);
         if (rxBytes > 0)
         {
             led_cc2530 = 1;
             data[rxBytes] = 0;
             ESP_LOGI(RX_TASK_TAG, "Read %d bytes: '%s'", rxBytes, data);
             // ESP_LOG_BUFFER_HEXDUMP(RX_TASK_TAG, data, rxBytes, ESP_LOG_INFO);
-            // uart_flush(UART_NUM_1);
+            // uart_flush(UART_NUM_0);
             if (mwifi_is_connected())
             {
                 led_status = 1;
@@ -456,165 +456,170 @@ static void led_mesh_task()
 /**
  * @brief Create a tcp client
  */
-// static int socket_tcp_client_create(const char *ip, uint16_t port)
-// {
-//     MDF_PARAM_CHECK(ip);
+static int socket_tcp_client_create(const char *ip, uint16_t port)
+{
+    MDF_PARAM_CHECK(ip);
 
-//     MDF_LOGI("Create a tcp client, ip: %s, port: %d", ip, port);
+    MDF_LOGI("Create a tcp client, ip: %s, port: %d", ip, port);
 
-//     mdf_err_t ret = ESP_OK;
-//     int sockfd = -1;
-//     struct sockaddr_in server_addr = {
-//         .sin_family = AF_INET,
-//         .sin_port = htons(port),
-//         .sin_addr.s_addr = inet_addr(ip),
-//     };
+    mdf_err_t ret = ESP_OK;
+    int sockfd = -1;
+    struct sockaddr_in server_addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(port),
+        .sin_addr.s_addr = inet_addr(ip),
+    };
 
-//     sockfd = socket(AF_INET, SOCK_STREAM, 0);
-//     MDF_ERROR_GOTO(sockfd < 0, ERR_EXIT, "socket create, sockfd: %d", sockfd);
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    MDF_ERROR_GOTO(sockfd < 0, ERR_EXIT, "socket create, sockfd: %d", sockfd);
 
-//     ret = connect(sockfd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_in));
-//     MDF_ERROR_GOTO(ret < 0, ERR_EXIT, "socket connect, ret: %d, ip: %s, port: %d",
-//                    ret, ip, port);
-//     return sockfd;
+    ret = connect(sockfd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_in));
+    MDF_ERROR_GOTO(ret < 0, ERR_EXIT, "socket connect, ret: %d, ip: %s, port: %d",
+                   ret, ip, port);
+    return sockfd;
 
-// ERR_EXIT:
+ERR_EXIT:
 
-//     if (sockfd != -1)
-//     {
-//         close(sockfd);
-//     }
+    if (sockfd != -1)
+    {
+        close(sockfd);
+    }
 
-//     return -1;
-// }
+    return -1;
+}
 
-// static void tcp_client_read_task(void *arg)
-// {
-//     mdf_err_t ret = MDF_OK;
-//     char *data = MDF_MALLOC(MWIFI_PAYLOAD_LEN);
-//     char *data_split = NULL;
-//     char *data_p = NULL;
-//     size_t size = MWIFI_PAYLOAD_LEN;
-//     uint8_t dest_addr[MWIFI_ADDR_LEN] = {0x0};
-//     mwifi_data_type_t data_type = {0x0};
-//     cJSON *json_root = NULL;
-//     cJSON *json_addr = NULL;
-//     cJSON *json_group = NULL;
-//     cJSON *json_data = NULL;
-//     cJSON *json_dest_addr = NULL;
+static void tcp_client_read_task(void *arg)
+{
+    mdf_err_t ret = MDF_OK;
+    char *data = MDF_MALLOC(MWIFI_PAYLOAD_LEN);
+    char *data_split = NULL;
+    char *data_p = NULL;
+    size_t size = MWIFI_PAYLOAD_LEN;
+    uint8_t dest_addr[MWIFI_ADDR_LEN] = {0x0};
+    mwifi_data_type_t data_type = {0x0};
+    cJSON *json_root = NULL;
+    cJSON *json_addr = NULL;
+    cJSON *json_group = NULL;
+    cJSON *json_data = NULL;
+    cJSON *json_dest_addr = NULL;
 
-//     MDF_LOGI("TCP client read task is running");
+    MDF_LOGI("TCP client read task is running");
 
-//     while (1)
-//     {
-//         if (g_sockfd == -1)
-//         {
-//             if (mwifi_is_connected() && esp_mesh_get_layer() == MESH_ROOT_LAYER)
-//             {
-//                 g_sockfd = socket_tcp_client_create(CONFIG_SERVER_IP, CONFIG_SERVER_PORT);
+    while (1)
+    {
+        if (g_sockfd < 0)
+        {
+            if (mwifi_is_connected() && esp_mesh_get_layer() == MESH_ROOT_LAYER)
+            {
+                g_sockfd = socket_tcp_client_create(CONFIG_SERVER_IP, CONFIG_SERVER_PORT);
 
-//                 if (g_sockfd == -1)
-//                 {
-//                     vTaskDelay(500 / portTICK_RATE_MS);
-//                     continue;
-//                 }
-//             }
-//         }
+                if (g_sockfd < 0)
+                {
+                    vTaskDelay(6000 / portTICK_RATE_MS);
+                    continue;
+                }
+            }
+        }
+        if (g_sockfd < 0)
+        {
+            vTaskDelay(6000 / portTICK_RATE_MS);
+            continue;
+        }
 
-//         memset(data, 0, MWIFI_PAYLOAD_LEN);
-//         ret = read(g_sockfd, data, size);
-//         //MDF_LOGD("TCP read, %d, size: %d, data: %s", g_sockfd, size, data);
+        memset(data, 0, MWIFI_PAYLOAD_LEN);
+        ret = read(g_sockfd, data, size);
+        // MDF_LOGD("TCP read, %d, size: %d, data: %s", g_sockfd, size, data);
 
-//         if (ret <= 0)
-//         {
-//             MDF_LOGW("<%s> TCP read", strerror(errno));
-//             close(g_sockfd);
-//             g_sockfd = -1;
-//             continue;
-//         }
+        if (ret <= 0)
+        {
+            MDF_LOGW("<%s> TCP read %d", strerror(errno),g_sockfd);
+            close(g_sockfd);
+            g_sockfd = -1;
+            continue;
+        }
 
-//         data_split = data;
-//         data_p = strstr(data_split, "}{");
-//         if (data_p != NULL)
-//         {
-//             data_p[1] = '\0';
-//         }
-//         while (1)
-//         {
-//             json_root = cJSON_Parse(data_split);
-//             MDF_ERROR_BREAK(!json_root, "cJSON_Parse, data format error");
+        data_split = data;
+        data_p = strstr(data_split, "}{");
+        if (data_p != NULL)
+        {
+            data_p[1] = '\0';
+        }
+        while (1)
+        {
+            json_root = cJSON_Parse(data_split);
+            MDF_ERROR_BREAK(!json_root, "cJSON_Parse, data format error");
 
-//             /**
-//          * @brief Check if it is a group address. If it is a group address, data_type.group = true.
-//          */
-//             json_addr = cJSON_GetObjectItem(json_root, "dest_addr");
-//             json_group = cJSON_GetObjectItem(json_root, "group");
-//             json_data = cJSON_GetObjectItem(json_root, "data");
+            /**
+         * @brief Check if it is a group address. If it is a group address, data_type.group = true.
+         */
+            json_addr = cJSON_GetObjectItem(json_root, "dest_addr");
+            json_group = cJSON_GetObjectItem(json_root, "group");
+            json_data = cJSON_GetObjectItem(json_root, "data");
 
-//             if (json_addr)
-//             {
-//                 data_type.group = false;
-//                 json_dest_addr = json_addr;
-//             }
-//             else if (json_group)
-//             {
-//                 data_type.group = true;
-//                 json_dest_addr = json_group;
-//             }
-//             else
-//             {
-//                 MDF_LOGW("Address not found");
-//                 cJSON_Delete(json_root);
-//                 break;
-//             }
+            if (json_addr)
+            {
+                data_type.group = false;
+                json_dest_addr = json_addr;
+            }
+            else if (json_group)
+            {
+                data_type.group = true;
+                json_dest_addr = json_group;
+            }
+            else
+            {
+                MDF_LOGW("Address not found");
+                cJSON_Delete(json_root);
+                break;
+            }
 
-//             /**
-//          * @brief  Convert mac from string format to binary
-//          */
-//             do
-//             {
-//                 uint32_t mac_data[MWIFI_ADDR_LEN] = {0};
-//                 sscanf(json_dest_addr->valuestring, MACSTR,
-//                        mac_data, mac_data + 1, mac_data + 2,
-//                        mac_data + 3, mac_data + 4, mac_data + 5);
+            /**
+         * @brief  Convert mac from string format to binary
+         */
+            do
+            {
+                uint32_t mac_data[MWIFI_ADDR_LEN] = {0};
+                sscanf(json_dest_addr->valuestring, MACSTR,
+                       mac_data, mac_data + 1, mac_data + 2,
+                       mac_data + 3, mac_data + 4, mac_data + 5);
 
-//                 for (int i = 0; i < MWIFI_ADDR_LEN; i++)
-//                 {
-//                     dest_addr[i] = mac_data[i];
-//                 }
-//             } while (0);
+                for (int i = 0; i < MWIFI_ADDR_LEN; i++)
+                {
+                    dest_addr[i] = mac_data[i];
+                }
+            } while (0);
 
-//             char *send_data = cJSON_PrintUnformatted(json_data);
+            char *send_data = cJSON_PrintUnformatted(json_data);
 
-//             ret = mwifi_write(dest_addr, &data_type, send_data, strlen(send_data), true);
-//             //     MDF_ERROR_GOTO(ret != MDF_OK, FREE_MEM, "<%s> mwifi_root_write", mdf_err_to_name(ret));
+            ret = mwifi_write(dest_addr, &data_type, send_data, strlen(send_data), true);
+            //     MDF_ERROR_GOTO(ret != MDF_OK, FREE_MEM, "<%s> mwifi_root_write", mdf_err_to_name(ret));
 
-//             // FREE_MEM:
-//             MDF_FREE(send_data);
-//             cJSON_Delete(json_root);
+            // FREE_MEM:
+            MDF_FREE(send_data);
+            cJSON_Delete(json_root);
 
-//             if (data_p != NULL)
-//             {
-//                 data_split = &data_p[1];
-//                 data_split[0] = '{';
-//                 data_p = strstr(data_split, "}{");
-//                 if (data_p != NULL)
-//                 {
-//                     data_p[1] = '\0';
-//                 }
-//                 continue;
-//             }
-//             break;
-//         }
-//     }
+            if (data_p != NULL)
+            {
+                data_split = &data_p[1];
+                data_split[0] = '{';
+                data_p = strstr(data_split, "}{");
+                if (data_p != NULL)
+                {
+                    data_p[1] = '\0';
+                }
+                continue;
+            }
+            break;
+        }
+    }
 
-//     MDF_LOGI("TCP client read task is exit");
+    MDF_LOGI("TCP client read task is exit");
 
-//     close(g_sockfd);
-//     g_sockfd = -1;
-//     MDF_FREE(data);
-//     vTaskDelete(NULL);
-// }
+    close(g_sockfd);
+    g_sockfd = -1;
+    MDF_FREE(data);
+    vTaskDelete(NULL);
+}
 
 // static void tcp_client_write_task(void *arg)
 // {
@@ -680,17 +685,22 @@ static void root_read_task(void *arg)
             MDF_ERROR_CONTINUE(ret != MDF_OK, "<%s> mupgrade_root_handle", mdf_err_to_name(ret));
             continue;
         }
-        else if (g_sockfd > 0)
-        {
-            MDF_LOGD("TCP write, size: %d, data: %s", size, data);
-            // led_status = 1;
-            ret = write(g_sockfd, data, size);
-            MDF_ERROR_CONTINUE(ret <= 0, "<%s> TCP write", strerror(errno));
-        }
         else
         {
-            // led_status = 1;
-            uart_write_bytes(UART_NUM_1, data, size);
+            if (data[0] == '{')
+            {
+                if (g_sockfd > 0)
+                {
+                    MDF_LOGD("TCP write, size: %d, data: %s", size, data);
+                    // led_status = 1;
+                    ret = write(g_sockfd, data, size);
+                    MDF_ERROR_CONTINUE(ret <= 0, "<%s> TCP write", strerror(errno));
+                }
+            }
+            else
+            {
+                uart_write_bytes(UART_NUM_0, data, size);
+            }
         }
 
         MDF_LOGI("Receive [NODE] addr: " MACSTR ", size: %d, data: %s",
@@ -894,7 +904,7 @@ static void node_read_task(void *arg)
         else if (my_mesh_type != MWIFI_MESH_ROOT)
         {
             // led_status = 1;
-            uart_write_bytes(UART_NUM_1, data, size);
+            uart_write_bytes(UART_NUM_0, data, size);
         }
     }
     MDF_LOGW("Note read task is exit");
@@ -1221,13 +1231,13 @@ static mdf_err_t event_loop_cb(mdf_event_loop_t event, void *ctx)
         // xTaskCreatePinnedToCore(node_read_task, "node_read_task", 4 * 1024, NULL, 3 /*CONFIG_MDF_TASK_DEFAULT_PRIOTY*/, NULL, 0);
         break;
 
-    // case MDF_EVENT_MWIFI_VOTE_STARTED:
-    //     led_mesh = 1;
-    //     break;
+        // case MDF_EVENT_MWIFI_VOTE_STARTED:
+        //     led_mesh = 1;
+        //     break;
 
-    // case MDF_EVENT_MWIFI_VOTE_STOPPED:
-    //     led_mesh = 0;
-    //     break;
+        // case MDF_EVENT_MWIFI_VOTE_STOPPED:
+        //     led_mesh = 0;
+        //     break;
 
     case MDF_EVENT_MWIFI_PARENT_DISCONNECTED:
         MDF_LOGI("Parent is disconnected on station interface");
@@ -1273,7 +1283,7 @@ static mdf_err_t event_loop_cb(mdf_event_loop_t event, void *ctx)
         mespnow_read((mespnow_trans_pipe_e)ctx, esp_now_recv_address, esp_now_recv_data, &esp_now_recv_len, 100 / portTICK_RATE_MS);
         MDF_LOGI("Mespnow recv %d", (int)esp_now_recv_len);
 
-        uart_write_bytes(UART_NUM_1, esp_now_recv_data, esp_now_recv_len);
+        uart_write_bytes(UART_NUM_0, esp_now_recv_data, esp_now_recv_len);
         // snprintf(msg, sizeof(msg), "From: " MACSTR ", data: ", MAC2STR(src_addr), size, data);
         // MDF_LOGI("From: " MACSTR ", data: " MACSTR "", MAC2STR(src_addr), MAC2STR(data));
         break;
@@ -1356,8 +1366,8 @@ static void my_mwifi_init()
 
     // if (my_mesh_type == MWIFI_MESH_ROOT)
 
-    xTaskCreatePinnedToCore(root_read_task, "root_read_task", 4 * 1024, NULL, 3 /*CONFIG_MDF_TASK_DEFAULT_PRIOTY*/, NULL, 1);
-    xTaskCreatePinnedToCore(node_read_task, "node_read_task", 4 * 1024, NULL, 3 /*CONFIG_MDF_TASK_DEFAULT_PRIOTY*/, NULL, 1);
+    // xTaskCreatePinnedToCore(root_read_task, "root_read_task", 4 * 1024, NULL, 3 /*CONFIG_MDF_TASK_DEFAULT_PRIOTY*/, NULL, 1);
+    // xTaskCreatePinnedToCore(node_read_task, "node_read_task", 4 * 1024, NULL, 3 /*CONFIG_MDF_TASK_DEFAULT_PRIOTY*/, NULL, 1);
 }
 
 static void LED_INIT()
@@ -1400,10 +1410,10 @@ static void UART_INIT()
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE};
-    uart_param_config(UART_NUM_1, &uart_config);
-    uart_set_pin(UART_NUM_1, 17, 16, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    uart_param_config(UART_NUM_0, &uart_config);
+    uart_set_pin(UART_NUM_0, 1, 3, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     // We won't use a buffer for sending data.
-    uart_driver_install(UART_NUM_1, RX_BUF_SIZE * 2, 0, 0, NULL, 0);
+    uart_driver_install(UART_NUM_0, RX_BUF_SIZE * 2, 0, 0, NULL, 0);
 }
 
 void app_main()
@@ -1447,4 +1457,6 @@ void app_main()
     xTaskCreatePinnedToCore(node_read_task, "node_read_task", 4 * 1024, NULL, 4, NULL, 0);
 
     xTaskCreatePinnedToCore(uart1_rx_task, "uart1_rx_task", 1024 * 2, NULL, 5, NULL, 1);
+
+    xTaskCreatePinnedToCore(tcp_client_read_task, "tcp_server_read", 4 * 1024, NULL, 2, NULL, 1);
 }

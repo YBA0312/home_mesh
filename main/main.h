@@ -2,7 +2,7 @@
  * @Author       : YBA
  * @Date         : 2020-04-01 08:45:39
  * @LastEditors  : YBA
- * @LastEditTime : 2020-12-10 17:11:16
+ * @LastEditTime : 2020-12-10 18:55:47
  * @Description  : https://www.klyn-tech.com/
  * @FilePath     : /home_mesh/main/main.h
  * @Version      : 0.0.0
@@ -30,15 +30,15 @@
 #define CONFIG_ROUTER_PASSWORD "sanzhizhu7799"
 // #define CONFIG_MESH_ID "000001"
 // #define CONFIG_MESH_PASSWORD "19990312"
-// #define CONFIG_SERVER_IP "192.168.1.202"
-// #define CONFIG_SERVER_PORT 19393
+#define CONFIG_SERVER_IP "192.168.1.53"
+#define CONFIG_SERVER_PORT 8080
 
-// #define CONFIG_ROUTER_SSID "a02test3"
-// #define CONFIG_ROUTER_PASSWORD "klyn3609"
+// #define CONFIG_ROUTER_SSID "klyn-rpi-test"
+// #define CONFIG_ROUTER_PASSWORD "qilinkeji3609"
 #define CONFIG_MESH_ID "000313"
 #define CONFIG_MESH_PASSWORD "19990312"
-#define CONFIG_SERVER_IP "esp.yaoboan.com"
-#define CONFIG_SERVER_PORT 28082
+// #define CONFIG_SERVER_IP "192.168.12.1"
+// #define CONFIG_SERVER_PORT 28082
 
 #define STAUTS_LED 32
 #define MESH_LED 33
