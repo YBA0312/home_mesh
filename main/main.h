@@ -2,7 +2,7 @@
  * @Author       : YBA
  * @Date         : 2020-04-01 08:45:39
  * @LastEditors  : YBA
- * @LastEditTime : 2020-11-25 15:39:00
+ * @LastEditTime : 2020-12-10 19:05:39
  * @Description  : https://www.klyn-tech.com/
  * @FilePath     : /home_mesh/main/main.h
  * @Version      : 0.0.0
@@ -13,10 +13,10 @@
 #include "mdf_common.h"
 #include "mwifi.h"
 #include "mupgrade.h"
-#include "esp_bt.h"
+// #include "esp_bt.h"
 #include "mespnow.h"
-#include "mconfig_blufi.h"
-#include "mconfig_chain.h"
+// #include "mconfig_blufi.h"
+// #include "mconfig_chain.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
 #include <driver/adc.h>
@@ -25,21 +25,35 @@
 #include "driver/ledc.h"
 
 //#define BUF_SIZE (1024)
-#define VERSION "0.28"
-// #define CONFIG_ROUTER_SSID "kiku233"
-// #define CONFIG_ROUTER_PASSWORD "sanzhizhu7799"
+#define VERSION "1.0.2"
+#define CONFIG_ROUTER_SSID "kiku233"
+#define CONFIG_ROUTER_PASSWORD "sanzhizhu7799"
 // #define CONFIG_MESH_ID "000001"
 // #define CONFIG_MESH_PASSWORD "19990312"
 // #define CONFIG_SERVER_IP "192.168.1.202"
 // #define CONFIG_SERVER_PORT 19393
 
-#define CONFIG_ROUTER_SSID "kiku233"
-#define CONFIG_ROUTER_PASSWORD "sanzhizhu7799"
-#define CONFIG_MESH_ID "000312"
+// #define CONFIG_ROUTER_SSID "a02test3"
+// #define CONFIG_ROUTER_PASSWORD "klyn3609"
+#define CONFIG_MESH_ID "000313"
 #define CONFIG_MESH_PASSWORD "19990312"
-#define CONFIG_SERVER_IP "cloud.yaoboan.com"
-#define CONFIG_SERVER_PORT 8032
+#define CONFIG_SERVER_IP "esp.yaoboan.com"
+#define CONFIG_SERVER_PORT 28082
 
+#define STAUTS_LED 32
+#define MESH_LED 33
+#define CC2530_LED 25
+#define BIT1_LED 26
+#define BIT2_LED 27
+#define BIT3_LED 14
+#define BIT4_LED 12
+
+#define CC2530_RESET_PIN 13
+
+#define LED_ON 0
+#define LED_OFF 1
+
+#define RX_BUF_SIZE 1024
 
 static void ota_task();
 
