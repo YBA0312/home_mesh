@@ -135,34 +135,34 @@ mwifi_node_type_t my_mesh_type = MWIFI_MESH_IDLE;
 //     vTaskDelete(NULL);
 // }
 
-#define val_limit 32
-#define val_size 45
-int val_list[val_size];
-int val_list_sort[val_size];
-int val_list_cur = 0;
+// #define val_limit 32
+// #define val_size 45
+// int val_list[val_size];
+// int val_list_sort[val_size];
+// int val_list_cur = 0;
 
-int inc(const void *a, const void *b)
-{
-    return *(int *)a - *(int *)b;
-}
+// int inc(const void *a, const void *b)
+// {
+//     return *(int *)a - *(int *)b;
+// }
 
-static int filter_mid(int in)
-{
-    // int out = 0;
-    val_list[val_list_cur++] = in;
-    if (val_list_cur == val_size)
-    {
-        val_list_cur = 0;
-    }
-    memcpy(val_list_sort, val_list, sizeof(val_list));
-    qsort(val_list_sort, val_size, sizeof(val_list_sort[0]), inc);
-    // for (int i = 15; i < (val_size - 15); i++)
-    // {
-    //     out += val_list_sort[i];
-    // }
-    // return out / (val_size - 30);
-    return val_list_sort[(val_size - 1) / 2];
-}
+// static int filter_mid(int in)
+// {
+//     // int out = 0;
+//     val_list[val_list_cur++] = in;
+//     if (val_list_cur == val_size)
+//     {
+//         val_list_cur = 0;
+//     }
+//     memcpy(val_list_sort, val_list, sizeof(val_list));
+//     qsort(val_list_sort, val_size, sizeof(val_list_sort[0]), inc);
+//     // for (int i = 15; i < (val_size - 15); i++)
+//     // {
+//     //     out += val_list_sort[i];
+//     // }
+//     // return out / (val_size - 30);
+//     return val_list_sort[(val_size - 1) / 2];
+// }
 
 // int val_mid = 3000;
 
@@ -214,40 +214,40 @@ static int filter_mid(int in)
 //     return in * 2;
 // }
 
-static void LED_ADC(void *arg)
-{
-    int val;
-    // ADC1
-    gpio_pad_select_gpio(BLINK_GPIO);
-    gpio_set_pull_mode(BLINK_GPIO, GPIO_PULLDOWN_ONLY);
-    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
-    adc1_config_width(ADC_WIDTH_BIT_12);
-    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
-    dac_output_enable(DAC_CHANNEL_2);
-    dac_output_voltage(DAC_CHANNEL_2, 0);
-    vTaskDelay(10 / portTICK_PERIOD_MS);
-    while (1)
-    {
-        val = adc1_get_raw(ADC1_CHANNEL_6);
-        // adc = val;
-        val = filter_mid(val);
-        // val = filter_process(val);
-        // val = filter_boundary(val);
-        // val = filter_doubled(val);
+// static void LED_ADC(void *arg)
+// {
+//     int val;
+//     // ADC1
+//     gpio_pad_select_gpio(BLINK_GPIO);
+//     gpio_set_pull_mode(BLINK_GPIO, GPIO_PULLDOWN_ONLY);
+//     gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+//     adc1_config_width(ADC_WIDTH_BIT_12);
+//     adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
+//     dac_output_enable(DAC_CHANNEL_2);
+//     dac_output_voltage(DAC_CHANNEL_2, 0);
+//     vTaskDelay(10 / portTICK_PERIOD_MS);
+//     while (1)
+//     {
+//         val = adc1_get_raw(ADC1_CHANNEL_6);
+//         // adc = val;
+//         val = filter_mid(val);
+//         // val = filter_process(val);
+//         // val = filter_boundary(val);
+//         // val = filter_doubled(val);
         
-        dac_output_voltage(DAC_CHANNEL_2, (uint8_t)((uint32_t)val * 255 / 4095));
-        if (val > 1000)
-        {
-            gpio_set_level(BLINK_GPIO, 1);
-        }
-        else
-        {
-            gpio_set_level(BLINK_GPIO, 0);
-        }
-        vTaskDelay(1);
-    }
-    vTaskDelete(NULL);
-}
+//         dac_output_voltage(DAC_CHANNEL_2, (uint8_t)((uint32_t)val * 255 / 4095));
+//         if (val > 1000)
+//         {
+//             gpio_set_level(BLINK_GPIO, 1);
+//         }
+//         else
+//         {
+//             gpio_set_level(BLINK_GPIO, 0);
+//         }
+//         vTaskDelay(1);
+//     }
+//     vTaskDelete(NULL);
+// }
 
 // static void ADC2DAC(void *arg)
 // {
@@ -1220,7 +1220,7 @@ void app_main()
 
     // xTaskCreatePinnedToCore(ADC2DAC, "ADC2DAC", 4 * 1024, NULL, 3, NULL, 1);
 
-    xTaskCreatePinnedToCore(LED_ADC, "LED_ADC", 4 * 1024, NULL, 3, NULL, 1);
+    // xTaskCreatePinnedToCore(LED_ADC, "LED_ADC", 4 * 1024, NULL, 3, NULL, 1);
 
     // xTaskCreatePinnedToCore(LED_CONTROL, "LED_CONTROL", 4 * 1024, NULL, 3, NULL, 1);
 
