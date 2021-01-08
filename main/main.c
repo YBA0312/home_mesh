@@ -14,15 +14,287 @@
 
 #include "main.h"
 
-static int g_sockfd = -1;
+static int g_sockfd = -1, parent_connected = 0;
 static const char *TAG = "Home mesh";
 char OTA_FileUrl[255] = "http://192.168.1.53:8070/ota.bin";
-mwifi_node_type_t my_mesh_type = MWIFI_MESH_NODE;
+mwifi_node_type_t my_mesh_type = MWIFI_MESH_IDLE;
 uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 static char esp_now_recv_data[256] = {0};
 static size_t esp_now_recv_len = 0;
 static unsigned char esp_now_recv_address[6] = {0};
 static unsigned char led_status = 0, led_cc2530 = 0, led_mesh = 0;
+
+// 数字0-9
+const uint8_t iv_18_number[10] = {0xBB, 0x12, 0xAE, 0xB6, 0x17, 0xB5, 0xBD, 0x92, 0xBF, 0xB7};
+// 位，从右往左
+const uint16_t iv_18_show[9] = {0x80, 0x01, 0x40, 0x02, 0x20, 0x04, 0x08, 0x10, 0x100};
+// 小数点
+const uint8_t iv_18_point = 0x40;
+// 横杆
+const uint8_t iv_18_line = 0x04;
+// 使用的时候组合，位在高位，数字在低位
+// 从低位写入位移寄存器
+uint8_t iv_18_display[9] = {0};
+
+float iv_18_light = 1.0;
+
+uint8_t iv_18_brightness[9] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+
+typedef enum
+{
+    iv_18_mode_stop,
+    iv_18_mode_time,
+    iv_18_mode_date,
+    iv_18_mode_light,
+    iv_18_mode_max
+} IV_18_MODE;
+
+IV_18_MODE iv_18_mode = iv_18_mode_time;
+ledc_timer_config_t ledc_timer = {
+    .duty_resolution = LEDC_TIMER_8_BIT, // resolution of PWM duty
+    .freq_hz = 160000,                   // frequency of PWM signal
+    .speed_mode = LEDC_HIGH_SPEED_MODE,  // timer mode
+    .timer_num = LEDC_TIMER_0,           // timer index
+    // .clk_cfg = LEDC_AUTO_CLK,            // Auto select the source clock
+};
+ledc_channel_config_t ledc_channel = {
+    .channel = LEDC_CHANNEL_0,
+    .duty = 0,
+    .gpio_num = IV_18_BLANK,
+    .speed_mode = LEDC_HIGH_SPEED_MODE,
+    .hpoint = 0,
+    .timer_sel = LEDC_TIMER_0,
+};
+
+RTC_DATA_ATTR static int boot_count = 0;
+
+static void initialize_sntp(void);
+
+static uint16_t touch1_min = 970, touch1_max = 1010, touch1_mid;
+static bool istouch1(uint16_t touch1_value)
+{
+    // if (touch1_value > touch1_max)
+    // {
+    //     touch1_max = touch1_value;
+    // }
+    // if (touch1_value < touch1_min)
+    // {
+    //     touch1_min = touch1_value;
+    // }
+    // touch1_mid = (touch1_max - touch1_min) * 2 / 3 + touch1_min;
+    // return (touch1_value < touch1_mid);
+    return (touch1_value < touch1_max - 20);
+}
+
+static uint16_t touch2_min = 860, touch2_max = 880, touch2_mid;
+static bool istouch2(uint16_t touch2_value)
+{
+    // if (touch2_value > touch2_max)
+    // {
+    //     touch2_max = touch2_value;
+    // }
+    // if (touch2_value < touch2_min)
+    // {
+    //     touch2_min = touch2_value;
+    // }
+    // touch2_mid = (touch2_max - touch2_min) * 2 / 3 + touch2_min;
+    // return (touch2_value < touch2_mid);
+    return (touch2_value < touch2_max - 10);
+}
+
+static void touch(void *arg)
+{
+    uint16_t touch1_value;
+    uint16_t touch2_value;
+    while (1)
+    {
+        touch_pad_read_filtered(TOUCH1, &touch1_value);
+        touch_pad_read_filtered(TOUCH2, &touch2_value);
+        if (istouch1(touch1_value) || istouch2(touch2_value))
+        {
+            gpio_set_level(BLINK_GPIO, 0);
+        }
+        else
+        {
+            gpio_set_level(BLINK_GPIO, 1);
+        }
+        if (istouch2(touch2_value))
+        {
+            iv_18_mode++;
+            if (iv_18_mode >= iv_18_mode_max)
+            {
+                iv_18_mode = 1;
+            }
+            do
+            {
+                touch_pad_read_filtered(TOUCH2, &touch2_value);
+                vTaskDelay(100 / portTICK_PERIOD_MS);
+            } while (istouch2(touch2_value));
+        }
+        if (istouch1(touch1_value))
+        {
+            if (iv_18_mode > iv_18_mode_stop)
+            {
+                iv_18_mode--;
+                if (iv_18_mode == iv_18_mode_stop)
+                {
+                    iv_18_mode = iv_18_mode_max - 1;
+                }
+            }
+            do
+            {
+                touch_pad_read_filtered(TOUCH1, &touch1_value);
+                vTaskDelay(100 / portTICK_PERIOD_MS);
+            } while (istouch1(touch1_value));
+        }
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
+    vTaskDelete(NULL);
+}
+
+static void timer(void *arg)
+{
+    time_t now;
+    struct tm timeinfo;
+    int brightness_fx = 1;
+    int light_value;
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
+    while (1)
+    {
+        light_value = adc1_get_raw(ADC1_CHANNEL_6);
+        if (light_value < 1024)
+        {
+            iv_18_light = 0.2;
+        }
+        else if (light_value < 2048)
+        {
+            iv_18_light = 0.2 + (float)(light_value - 1024) / 1280;
+        }
+        else
+        {
+            iv_18_light = 1.0;
+        }
+        
+        switch (iv_18_mode)
+        {
+        case iv_18_mode_time:
+        {
+            if (brightness_fx == 1)
+            {
+                if (iv_18_brightness[2] < 255)
+                {
+                    iv_18_brightness[2] += 15;
+                    iv_18_brightness[5] += 15;
+                }
+                else
+                {
+                    brightness_fx = 0;
+                }
+            }
+            else if (brightness_fx == 0)
+            {
+                if (iv_18_brightness[2] > 0)
+                {
+                    iv_18_brightness[2] -= 15;
+                    iv_18_brightness[5] -= 15;
+                }
+                else
+                {
+                    brightness_fx = 1;
+                }
+            }
+            time(&now);
+            localtime_r(&now, &timeinfo);
+            iv_18_display[0] = iv_18_number[timeinfo.tm_sec % 10];
+            iv_18_display[1] = iv_18_number[timeinfo.tm_sec / 10];
+            iv_18_display[2] = iv_18_point;
+            iv_18_display[3] = iv_18_number[timeinfo.tm_min % 10];
+            iv_18_display[4] = iv_18_number[timeinfo.tm_min / 10];
+            iv_18_display[5] = iv_18_point;
+            iv_18_display[6] = iv_18_number[timeinfo.tm_hour % 10];
+            iv_18_display[7] = iv_18_number[timeinfo.tm_hour / 10];
+            break;
+        }
+        case iv_18_mode_date:
+        {
+            iv_18_brightness[2] = 0xff;
+            iv_18_brightness[5] = 0xff;
+            time(&now);
+            localtime_r(&now, &timeinfo);
+            iv_18_display[0] = iv_18_number[timeinfo.tm_mday % 10];
+            iv_18_display[1] = iv_18_number[timeinfo.tm_mday / 10];
+            iv_18_display[2] = iv_18_number[(timeinfo.tm_mon + 1) % 10];
+            iv_18_display[3] = iv_18_number[(timeinfo.tm_mon + 1) / 10];
+            iv_18_display[4] = iv_18_number[(timeinfo.tm_year + 1900) % 10];
+            iv_18_display[5] = iv_18_number[((timeinfo.tm_year + 1900) / 10) % 10];
+            iv_18_display[6] = iv_18_number[((timeinfo.tm_year + 1900) / 100) % 10];
+            iv_18_display[7] = iv_18_number[((timeinfo.tm_year + 1900) / 1000) % 10];
+            iv_18_display[2] |= iv_18_point;
+            iv_18_display[4] |= iv_18_point;
+            break;
+        }
+        case iv_18_mode_light:
+        {
+            iv_18_brightness[2] = 0xff;
+            iv_18_brightness[5] = 0xff;
+            // light_value = adc1_get_raw(ADC1_CHANNEL_6);
+            int i;
+            for (i = 0; light_value > 0; i++)
+            {
+                iv_18_display[i] = iv_18_number[light_value % 10];
+                light_value /= 10;
+            }
+            for (; i < 9; i++)
+            {
+                iv_18_display[i] = 0;
+            }
+            break;
+        }
+        default:
+            break;
+        }
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+    }
+    vTaskDelete(NULL);
+}
+
+static void iv_18(void *arg)
+{
+    gpio_pad_select_gpio(IV_18_DIN);
+    gpio_set_pull_mode(IV_18_DIN, GPIO_PULLDOWN_ONLY);
+    gpio_set_direction(IV_18_DIN, GPIO_MODE_OUTPUT);
+    gpio_pad_select_gpio(IV_18_CLK);
+    gpio_set_pull_mode(IV_18_CLK, GPIO_PULLDOWN_ONLY);
+    gpio_set_direction(IV_18_CLK, GPIO_MODE_OUTPUT);
+    gpio_pad_select_gpio(IV_18_LOAD);
+    gpio_set_pull_mode(IV_18_LOAD, GPIO_PULLDOWN_ONLY);
+    gpio_set_direction(IV_18_LOAD, GPIO_MODE_OUTPUT);
+
+    uint32_t data;
+
+    while (1)
+    {
+        for (int n = 0; n < 9; n++)
+        {
+            data = iv_18_show[n] << 8 | iv_18_display[n];
+            for (int i = 0; i < 17; i++)
+            {
+                GPIO.out_w1ts = ((data >> i) & 1) << IV_18_DIN;
+                GPIO.out_w1ts = 1 << IV_18_CLK;
+                GPIO.out_w1tc = ((data >> i) & 1) << IV_18_DIN;
+                GPIO.out_w1tc = 1 << IV_18_CLK;
+            }
+            GPIO.out_w1ts = (1 << IV_18_LOAD);
+            ledc_set_duty(ledc_channel.speed_mode, ledc_channel.channel, 255 - (float)iv_18_brightness[n] * iv_18_light);
+            ledc_update_duty(ledc_channel.speed_mode, ledc_channel.channel);
+            // ets_delay_us(1);
+            GPIO.out_w1tc = (1 << IV_18_LOAD);
+            vTaskDelay(2);
+        }
+    }
+    vTaskDelete(NULL);
+}
 
 // static void LED_CONTROL(void *arg)
 // {
@@ -238,7 +510,7 @@ static unsigned char led_status = 0, led_cc2530 = 0, led_mesh = 0;
 //         // val = filter_process(val);
 //         // val = filter_boundary(val);
 //         // val = filter_doubled(val);
-        
+
 //         dac_output_voltage(DAC_CHANNEL_2, (uint8_t)((uint32_t)val * 255 / 4095));
 //         if (val > 1000)
 //         {
@@ -368,253 +640,253 @@ static void uart1_rx_task()
     vTaskDelete(NULL);
 }
 
-static void led_status_task()
-{
-    while (1)
-    {
-        if (led_status)
-        {
-            led_status = 0;
-            gpio_set_level(STAUTS_LED, LED_ON);
-            vTaskDelay(500 / portTICK_RATE_MS);
-        }
-        else
-        {
-            gpio_set_level(STAUTS_LED, LED_OFF);
-            vTaskDelay(100 / portTICK_RATE_MS);
-        }
-    }
-    vTaskDelete(NULL);
-}
+// static void led_status_task()
+// {
+//     while (1)
+//     {
+//         if (led_status)
+//         {
+//             led_status = 0;
+//             gpio_set_level(STAUTS_LED, LED_ON);
+//             vTaskDelay(500 / portTICK_RATE_MS);
+//         }
+//         else
+//         {
+//             gpio_set_level(STAUTS_LED, LED_OFF);
+//             vTaskDelay(100 / portTICK_RATE_MS);
+//         }
+//     }
+//     vTaskDelete(NULL);
+// }
 
-static void led_cc2530_task()
-{
-    while (1)
-    {
-        if (led_cc2530)
-        {
-            led_cc2530 = 0;
-            gpio_set_level(CC2530_LED, LED_ON);
-            vTaskDelay(1000 / portTICK_RATE_MS);
-        }
-        else
-        {
-            gpio_set_level(CC2530_LED, LED_OFF);
-            vTaskDelay(100 / portTICK_RATE_MS);
-        }
-    }
-    vTaskDelete(NULL);
-}
+// static void led_cc2530_task()
+// {
+//     while (1)
+//     {
+//         if (led_cc2530)
+//         {
+//             led_cc2530 = 0;
+//             gpio_set_level(CC2530_LED, LED_ON);
+//             vTaskDelay(1000 / portTICK_RATE_MS);
+//         }
+//         else
+//         {
+//             gpio_set_level(CC2530_LED, LED_OFF);
+//             vTaskDelay(100 / portTICK_RATE_MS);
+//         }
+//     }
+//     vTaskDelete(NULL);
+// }
 
-static void led_mesh_task()
-{
-    unsigned char led_num = 0;
-    while (1)
-    {
-        switch (led_mesh)
-        {
-        case 0: //未组网
-            if (led_num)
-            {
-                gpio_set_level(MESH_LED, LED_OFF);
-            }
-            else
-            {
-                gpio_set_level(MESH_LED, LED_ON);
-            }
-            led_num = !led_num;
-            vTaskDelay(500 / portTICK_RATE_MS);
-            break;
+// static void led_mesh_task()
+// {
+//     unsigned char led_num = 0;
+//     while (1)
+//     {
+//         switch (led_mesh)
+//         {
+//         case 0: //未组网
+//             if (led_num)
+//             {
+//                 gpio_set_level(MESH_LED, LED_OFF);
+//             }
+//             else
+//             {
+//                 gpio_set_level(MESH_LED, LED_ON);
+//             }
+//             led_num = !led_num;
+//             vTaskDelay(500 / portTICK_RATE_MS);
+//             break;
 
-        case 1: //组网中
-            if (led_num)
-            {
-                gpio_set_level(MESH_LED, LED_OFF);
-            }
-            else
-            {
-                gpio_set_level(MESH_LED, LED_ON);
-            }
-            led_num = !led_num;
-            vTaskDelay(100 / portTICK_RATE_MS);
-            break;
+//         case 1: //组网中
+//             if (led_num)
+//             {
+//                 gpio_set_level(MESH_LED, LED_OFF);
+//             }
+//             else
+//             {
+//                 gpio_set_level(MESH_LED, LED_ON);
+//             }
+//             led_num = !led_num;
+//             vTaskDelay(100 / portTICK_RATE_MS);
+//             break;
 
-        case 2: //组网完成
-            gpio_set_level(MESH_LED, LED_ON);
-            vTaskDelay(500 / portTICK_RATE_MS);
-            break;
+//         case 2: //组网完成
+//             gpio_set_level(MESH_LED, LED_ON);
+//             vTaskDelay(500 / portTICK_RATE_MS);
+//             break;
 
-        default:
-            gpio_set_level(MESH_LED, LED_OFF);
-            vTaskDelay(500 / portTICK_RATE_MS);
-            break;
-        }
-    }
-    vTaskDelete(NULL);
-}
+//         default:
+//             gpio_set_level(MESH_LED, LED_OFF);
+//             vTaskDelay(500 / portTICK_RATE_MS);
+//             break;
+//         }
+//     }
+//     vTaskDelete(NULL);
+// }
 
 /**
  * @brief Create a tcp client
  */
-// static int socket_tcp_client_create(const char *ip, uint16_t port)
-// {
-//     MDF_PARAM_CHECK(ip);
+static int socket_tcp_client_create(const char *ip, uint16_t port)
+{
+    MDF_PARAM_CHECK(ip);
 
-//     MDF_LOGI("Create a tcp client, ip: %s, port: %d", ip, port);
+    MDF_LOGI("Create a tcp client, ip: %s, port: %d", ip, port);
 
-//     mdf_err_t ret = ESP_OK;
-//     int sockfd = -1;
-//     struct sockaddr_in server_addr = {
-//         .sin_family = AF_INET,
-//         .sin_port = htons(port),
-//         .sin_addr.s_addr = inet_addr(ip),
-//     };
+    mdf_err_t ret = ESP_OK;
+    int sockfd = -1;
+    struct sockaddr_in server_addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(port),
+        .sin_addr.s_addr = inet_addr(ip),
+    };
 
-//     sockfd = socket(AF_INET, SOCK_STREAM, 0);
-//     MDF_ERROR_GOTO(sockfd < 0, ERR_EXIT, "socket create, sockfd: %d", sockfd);
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    MDF_ERROR_GOTO(sockfd < 0, ERR_EXIT, "socket create, sockfd: %d", sockfd);
 
-//     ret = connect(sockfd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_in));
-//     MDF_ERROR_GOTO(ret < 0, ERR_EXIT, "socket connect, ret: %d, ip: %s, port: %d",
-//                    ret, ip, port);
-//     return sockfd;
+    ret = connect(sockfd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_in));
+    MDF_ERROR_GOTO(ret < 0, ERR_EXIT, "socket connect, ret: %d, ip: %s, port: %d",
+                   ret, ip, port);
+    return sockfd;
 
-// ERR_EXIT:
+ERR_EXIT:
 
-//     if (sockfd != -1)
-//     {
-//         close(sockfd);
-//     }
+    if (sockfd != -1)
+    {
+        close(sockfd);
+    }
 
-//     return -1;
-// }
+    return -1;
+}
 
-// static void tcp_client_read_task(void *arg)
-// {
-//     mdf_err_t ret = MDF_OK;
-//     char *data = MDF_MALLOC(MWIFI_PAYLOAD_LEN);
-//     char *data_split = NULL;
-//     char *data_p = NULL;
-//     size_t size = MWIFI_PAYLOAD_LEN;
-//     uint8_t dest_addr[MWIFI_ADDR_LEN] = {0x0};
-//     mwifi_data_type_t data_type = {0x0};
-//     cJSON *json_root = NULL;
-//     cJSON *json_addr = NULL;
-//     cJSON *json_group = NULL;
-//     cJSON *json_data = NULL;
-//     cJSON *json_dest_addr = NULL;
+static void tcp_client_read_task(void *arg)
+{
+    mdf_err_t ret = MDF_OK;
+    char *data = MDF_MALLOC(MWIFI_PAYLOAD_LEN);
+    char *data_split = NULL;
+    char *data_p = NULL;
+    size_t size = MWIFI_PAYLOAD_LEN;
+    uint8_t dest_addr[MWIFI_ADDR_LEN] = {0x0};
+    mwifi_data_type_t data_type = {0x0};
+    cJSON *json_root = NULL;
+    cJSON *json_addr = NULL;
+    cJSON *json_group = NULL;
+    cJSON *json_data = NULL;
+    cJSON *json_dest_addr = NULL;
 
-//     MDF_LOGI("TCP client read task is running");
+    MDF_LOGI("TCP client read task is running");
 
-//     while (1)
-//     {
-//         if (g_sockfd == -1)
-//         {
-//             if (mwifi_is_connected() && esp_mesh_get_layer() == MESH_ROOT_LAYER)
-//             {
-//                 g_sockfd = socket_tcp_client_create(CONFIG_SERVER_IP, CONFIG_SERVER_PORT);
+    while (1)
+    {
+        if (g_sockfd == -1)
+        {
+            if (mwifi_is_connected()) //&& esp_mesh_get_layer() == MESH_ROOT_LAYER
+            {
+                g_sockfd = socket_tcp_client_create(CONFIG_SERVER_IP, CONFIG_SERVER_PORT);
 
-//                 if (g_sockfd == -1)
-//                 {
-//                     vTaskDelay(500 / portTICK_RATE_MS);
-//                     continue;
-//                 }
-//             }
-//         }
+                if (g_sockfd == -1)
+                {
+                    vTaskDelay(500 / portTICK_RATE_MS);
+                    continue;
+                }
+            }
+        }
 
-//         memset(data, 0, MWIFI_PAYLOAD_LEN);
-//         ret = read(g_sockfd, data, size);
-//         //MDF_LOGD("TCP read, %d, size: %d, data: %s", g_sockfd, size, data);
+        memset(data, 0, MWIFI_PAYLOAD_LEN);
+        ret = read(g_sockfd, data, size);
+        //MDF_LOGD("TCP read, %d, size: %d, data: %s", g_sockfd, size, data);
 
-//         if (ret <= 0)
-//         {
-//             MDF_LOGW("<%s> TCP read", strerror(errno));
-//             close(g_sockfd);
-//             g_sockfd = -1;
-//             continue;
-//         }
+        if (ret <= 0)
+        {
+            MDF_LOGW("<%s> TCP read", strerror(errno));
+            close(g_sockfd);
+            g_sockfd = -1;
+            continue;
+        }
 
-//         data_split = data;
-//         data_p = strstr(data_split, "}{");
-//         if (data_p != NULL)
-//         {
-//             data_p[1] = '\0';
-//         }
-//         while (1)
-//         {
-//             json_root = cJSON_Parse(data_split);
-//             MDF_ERROR_BREAK(!json_root, "cJSON_Parse, data format error");
+        data_split = data;
+        data_p = strstr(data_split, "}{");
+        if (data_p != NULL)
+        {
+            data_p[1] = '\0';
+        }
+        while (1)
+        {
+            json_root = cJSON_Parse(data_split);
+            MDF_ERROR_BREAK(!json_root, "cJSON_Parse, data format error");
 
-//             /**
-//          * @brief Check if it is a group address. If it is a group address, data_type.group = true.
-//          */
-//             json_addr = cJSON_GetObjectItem(json_root, "dest_addr");
-//             json_group = cJSON_GetObjectItem(json_root, "group");
-//             json_data = cJSON_GetObjectItem(json_root, "data");
+            /**
+         * @brief Check if it is a group address. If it is a group address, data_type.group = true.
+         */
+            json_addr = cJSON_GetObjectItem(json_root, "dest_addr");
+            json_group = cJSON_GetObjectItem(json_root, "group");
+            json_data = cJSON_GetObjectItem(json_root, "data");
 
-//             if (json_addr)
-//             {
-//                 data_type.group = false;
-//                 json_dest_addr = json_addr;
-//             }
-//             else if (json_group)
-//             {
-//                 data_type.group = true;
-//                 json_dest_addr = json_group;
-//             }
-//             else
-//             {
-//                 MDF_LOGW("Address not found");
-//                 cJSON_Delete(json_root);
-//                 break;
-//             }
+            if (json_addr)
+            {
+                data_type.group = false;
+                json_dest_addr = json_addr;
+            }
+            else if (json_group)
+            {
+                data_type.group = true;
+                json_dest_addr = json_group;
+            }
+            else
+            {
+                MDF_LOGW("Address not found");
+                cJSON_Delete(json_root);
+                break;
+            }
 
-//             /**
-//          * @brief  Convert mac from string format to binary
-//          */
-//             do
-//             {
-//                 uint32_t mac_data[MWIFI_ADDR_LEN] = {0};
-//                 sscanf(json_dest_addr->valuestring, MACSTR,
-//                        mac_data, mac_data + 1, mac_data + 2,
-//                        mac_data + 3, mac_data + 4, mac_data + 5);
+            /**
+         * @brief  Convert mac from string format to binary
+         */
+            do
+            {
+                uint32_t mac_data[MWIFI_ADDR_LEN] = {0};
+                sscanf(json_dest_addr->valuestring, MACSTR,
+                       mac_data, mac_data + 1, mac_data + 2,
+                       mac_data + 3, mac_data + 4, mac_data + 5);
 
-//                 for (int i = 0; i < MWIFI_ADDR_LEN; i++)
-//                 {
-//                     dest_addr[i] = mac_data[i];
-//                 }
-//             } while (0);
+                for (int i = 0; i < MWIFI_ADDR_LEN; i++)
+                {
+                    dest_addr[i] = mac_data[i];
+                }
+            } while (0);
 
-//             char *send_data = cJSON_PrintUnformatted(json_data);
+            char *send_data = cJSON_PrintUnformatted(json_data);
 
-//             ret = mwifi_write(dest_addr, &data_type, send_data, strlen(send_data), true);
-//             //     MDF_ERROR_GOTO(ret != MDF_OK, FREE_MEM, "<%s> mwifi_root_write", mdf_err_to_name(ret));
+            ret = mwifi_write(dest_addr, &data_type, send_data, strlen(send_data), true);
+            //     MDF_ERROR_GOTO(ret != MDF_OK, FREE_MEM, "<%s> mwifi_root_write", mdf_err_to_name(ret));
 
-//             // FREE_MEM:
-//             MDF_FREE(send_data);
-//             cJSON_Delete(json_root);
+            // FREE_MEM:
+            MDF_FREE(send_data);
+            cJSON_Delete(json_root);
 
-//             if (data_p != NULL)
-//             {
-//                 data_split = &data_p[1];
-//                 data_split[0] = '{';
-//                 data_p = strstr(data_split, "}{");
-//                 if (data_p != NULL)
-//                 {
-//                     data_p[1] = '\0';
-//                 }
-//                 continue;
-//             }
-//             break;
-//         }
-//     }
+            if (data_p != NULL)
+            {
+                data_split = &data_p[1];
+                data_split[0] = '{';
+                data_p = strstr(data_split, "}{");
+                if (data_p != NULL)
+                {
+                    data_p[1] = '\0';
+                }
+                continue;
+            }
+            break;
+        }
+    }
 
-//     MDF_LOGI("TCP client read task is exit");
+    MDF_LOGI("TCP client read task is exit");
 
-//     close(g_sockfd);
-//     g_sockfd = -1;
-//     MDF_FREE(data);
-//     vTaskDelete(NULL);
-// }
+    close(g_sockfd);
+    g_sockfd = -1;
+    MDF_FREE(data);
+    vTaskDelete(NULL);
+}
 
 // static void tcp_client_write_task(void *arg)
 // {
@@ -829,11 +1101,11 @@ static void node_read_task(void *arg)
                 //     }
                 //     // continue;
                 // }
-                else if (!strcmp(json_cmd->valuestring, "rollback"))
-                {
-                    esp_ota_mark_app_invalid_rollback_and_reboot();
-                    // continue;
-                }
+                // else if (!strcmp(json_cmd->valuestring, "rollback"))
+                // {
+                //     esp_ota_mark_app_invalid_rollback_and_reboot();
+                //     // continue;
+                // }
                 // else
                 // {
                 //     sprintf(data, "unknow cmd");
@@ -891,11 +1163,11 @@ static void node_read_task(void *arg)
             }
             cJSON_Delete(json_root);
         }
-        else if (my_mesh_type != MWIFI_MESH_ROOT)
-        {
-            // led_status = 1;
-            uart_write_bytes(UART_NUM_1, data, size);
-        }
+        // else if (my_mesh_type != MWIFI_MESH_ROOT)
+        // {
+        //     // led_status = 1;
+        //     uart_write_bytes(UART_NUM_1, data, size);
+        // }
     }
     MDF_LOGW("Note read task is exit");
 
@@ -1075,6 +1347,32 @@ EXIT:
     esp_http_client_cleanup(client);
     vTaskDelete(NULL);
 }
+static void initialize_sntp(void)
+{
+    ESP_LOGI(TAG, "Initializing SNTP");
+    sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    sntp_setservername(0, "ntp2.aliyun.com");
+    // sntp_set_time_sync_notification_cb(time_sync_notification_cb);
+    sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
+    sntp_init();
+}
+static void my_sntp_init()
+{
+    initialize_sntp();
+    // time_t now = 0;
+    // struct tm timeinfo = {0};
+    // int retry = 0;
+    // const int retry_count = 10;
+    // while (sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && ++retry < retry_count)
+    // {
+    //     ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
+    //     vTaskDelay(2000 / portTICK_PERIOD_MS);
+    // }
+    setenv("TZ", "CST-8", 1);
+    tzset();
+    // time(&now);
+    // localtime_r(&now, &timeinfo);
+}
 
 // mdf_err_t get_network_config(const char *name, mwifi_config_t *mwifi_config, char custom_data[32])
 // {
@@ -1207,11 +1505,13 @@ static mdf_err_t event_loop_cb(mdf_event_loop_t event, void *ctx)
     case MDF_EVENT_MWIFI_PARENT_CONNECTED:
         MDF_LOGI("Parent is connected on station interface");
         led_mesh = 2;
-        unsigned char layer = esp_mesh_get_layer();
-        gpio_set_level(BIT1_LED, !(layer & 1));
-        gpio_set_level(BIT2_LED, !(layer >> 1 & 1));
-        gpio_set_level(BIT3_LED, !(layer >> 2 & 1));
-        gpio_set_level(BIT4_LED, !(layer >> 3 & 1));
+        parent_connected = 1;
+        my_sntp_init();
+        // unsigned char layer = esp_mesh_get_layer();
+        // gpio_set_level(BIT1_LED, !(layer & 1));
+        // gpio_set_level(BIT2_LED, !(layer >> 1 & 1));
+        // gpio_set_level(BIT3_LED, !(layer >> 2 & 1));
+        // gpio_set_level(BIT4_LED, !(layer >> 3 & 1));
         // if (esp_mesh_get_layer() == MESH_ROOT_LAYER)
         // {
         //     xTaskCreatePinnedToCore(root_read_task, "root_read_task", 4 * 1024, NULL, 3 /*CONFIG_MDF_TASK_DEFAULT_PRIOTY*/, NULL, 0);
@@ -1221,17 +1521,18 @@ static mdf_err_t event_loop_cb(mdf_event_loop_t event, void *ctx)
         // xTaskCreatePinnedToCore(node_read_task, "node_read_task", 4 * 1024, NULL, 3 /*CONFIG_MDF_TASK_DEFAULT_PRIOTY*/, NULL, 0);
         break;
 
-    // case MDF_EVENT_MWIFI_VOTE_STARTED:
-    //     led_mesh = 1;
-    //     break;
+        // case MDF_EVENT_MWIFI_VOTE_STARTED:
+        //     led_mesh = 1;
+        //     break;
 
-    // case MDF_EVENT_MWIFI_VOTE_STOPPED:
-    //     led_mesh = 0;
-    //     break;
+        // case MDF_EVENT_MWIFI_VOTE_STOPPED:
+        //     led_mesh = 0;
+        //     break;
 
     case MDF_EVENT_MWIFI_PARENT_DISCONNECTED:
         MDF_LOGI("Parent is disconnected on station interface");
         led_mesh = 0;
+        parent_connected = 0;
         break;
 
         // case MDF_EVENT_MWIFI_ROUTING_TABLE_ADD:
@@ -1360,36 +1661,74 @@ static void my_mwifi_init()
     // xTaskCreatePinnedToCore(node_read_task, "node_read_task", 4 * 1024, NULL, 3 /*CONFIG_MDF_TASK_DEFAULT_PRIOTY*/, NULL, 1);
 }
 
-static void LED_INIT()
+// static void LED_INIT()
+// {
+//     gpio_pad_select_gpio(STAUTS_LED);
+//     gpio_set_pull_mode(STAUTS_LED, GPIO_PULLUP_ONLY);
+//     gpio_set_direction(STAUTS_LED, GPIO_MODE_OUTPUT);
+//     gpio_set_level(STAUTS_LED, LED_OFF);
+//     gpio_pad_select_gpio(MESH_LED);
+//     gpio_set_pull_mode(MESH_LED, GPIO_PULLUP_ONLY);
+//     gpio_set_direction(MESH_LED, GPIO_MODE_OUTPUT);
+//     gpio_set_level(MESH_LED, LED_OFF);
+//     gpio_pad_select_gpio(CC2530_LED);
+//     gpio_set_pull_mode(CC2530_LED, GPIO_PULLUP_ONLY);
+//     gpio_set_direction(CC2530_LED, GPIO_MODE_OUTPUT);
+//     gpio_set_level(CC2530_LED, LED_OFF);
+//     gpio_pad_select_gpio(BIT1_LED);
+//     gpio_set_pull_mode(BIT1_LED, GPIO_PULLUP_ONLY);
+//     gpio_set_direction(BIT1_LED, GPIO_MODE_OUTPUT);
+//     gpio_set_level(BIT1_LED, LED_OFF);
+//     gpio_pad_select_gpio(BIT2_LED);
+//     gpio_set_pull_mode(BIT2_LED, GPIO_PULLUP_ONLY);
+//     gpio_set_direction(BIT2_LED, GPIO_MODE_OUTPUT);
+//     gpio_set_level(BIT2_LED, LED_OFF);
+//     gpio_pad_select_gpio(BIT3_LED);
+//     gpio_set_pull_mode(BIT3_LED, GPIO_PULLUP_ONLY);
+//     gpio_set_direction(BIT3_LED, GPIO_MODE_OUTPUT);
+//     gpio_set_level(BIT3_LED, LED_OFF);
+//     gpio_pad_select_gpio(BIT4_LED);
+//     gpio_set_pull_mode(BIT4_LED, GPIO_PULLUP_ONLY);
+//     gpio_set_direction(BIT4_LED, GPIO_MODE_OUTPUT);
+//     gpio_set_level(BIT4_LED, LED_OFF);
+// }
+static void touch_set_thresholds(void)
 {
-    gpio_pad_select_gpio(STAUTS_LED);
-    gpio_set_pull_mode(STAUTS_LED, GPIO_PULLUP_ONLY);
-    gpio_set_direction(STAUTS_LED, GPIO_MODE_OUTPUT);
-    gpio_set_level(STAUTS_LED, LED_OFF);
-    gpio_pad_select_gpio(MESH_LED);
-    gpio_set_pull_mode(MESH_LED, GPIO_PULLUP_ONLY);
-    gpio_set_direction(MESH_LED, GPIO_MODE_OUTPUT);
-    gpio_set_level(MESH_LED, LED_OFF);
-    gpio_pad_select_gpio(CC2530_LED);
-    gpio_set_pull_mode(CC2530_LED, GPIO_PULLUP_ONLY);
-    gpio_set_direction(CC2530_LED, GPIO_MODE_OUTPUT);
-    gpio_set_level(CC2530_LED, LED_OFF);
-    gpio_pad_select_gpio(BIT1_LED);
-    gpio_set_pull_mode(BIT1_LED, GPIO_PULLUP_ONLY);
-    gpio_set_direction(BIT1_LED, GPIO_MODE_OUTPUT);
-    gpio_set_level(BIT1_LED, LED_OFF);
-    gpio_pad_select_gpio(BIT2_LED);
-    gpio_set_pull_mode(BIT2_LED, GPIO_PULLUP_ONLY);
-    gpio_set_direction(BIT2_LED, GPIO_MODE_OUTPUT);
-    gpio_set_level(BIT2_LED, LED_OFF);
-    gpio_pad_select_gpio(BIT3_LED);
-    gpio_set_pull_mode(BIT3_LED, GPIO_PULLUP_ONLY);
-    gpio_set_direction(BIT3_LED, GPIO_MODE_OUTPUT);
-    gpio_set_level(BIT3_LED, LED_OFF);
-    gpio_pad_select_gpio(BIT4_LED);
-    gpio_set_pull_mode(BIT4_LED, GPIO_PULLUP_ONLY);
-    gpio_set_direction(BIT4_LED, GPIO_MODE_OUTPUT);
-    gpio_set_level(BIT4_LED, LED_OFF);
+    uint16_t touch_value;
+    //read filtered value
+    touch_pad_read_filtered(TOUCH1, &touch_value);
+    ESP_LOGI(TAG, "touch init: touch pad 1 val is %d", touch_value);
+    //set interrupt threshold.
+    ESP_ERROR_CHECK(touch_pad_set_thresh(TOUCH1, touch_value / 2));
+
+    //read filtered value
+    touch_pad_read_filtered(TOUCH2, &touch_value);
+    ESP_LOGI(TAG, "touch init: touch pad 2 val is %d", touch_value);
+    //set interrupt threshold.
+    ESP_ERROR_CHECK(touch_pad_set_thresh(TOUCH2, touch_value / 2));
+}
+static void iv_18_init()
+{
+    gpio_pad_select_gpio(BLINK_GPIO);
+    gpio_set_pull_mode(BLINK_GPIO, GPIO_PULLDOWN_ONLY);
+    /* Set the GPIO as a push/pull output */
+    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(BLINK_GPIO, 1);
+
+    gpio_pad_select_gpio(IV_18_BLANK);
+    gpio_set_pull_mode(IV_18_BLANK, GPIO_PULLDOWN_ONLY);
+    gpio_set_direction(IV_18_BLANK, GPIO_MODE_OUTPUT);
+
+    touch_pad_init();
+    touch_pad_set_fsm_mode(TOUCH_FSM_MODE_TIMER);
+    touch_pad_config(TOUCH1, 0);
+    touch_pad_config(TOUCH2, 0);
+
+    touch_pad_filter_start(10);
+    //touch_set_thresholds();
+
+    ledc_timer_config(&ledc_timer);
+    ledc_channel_config(&ledc_channel);
 }
 
 static void UART_INIT()
@@ -1408,17 +1747,26 @@ static void UART_INIT()
 
 void app_main()
 {
-    MDF_ERROR_ASSERT(mdf_event_loop_init(event_loop_cb));
-    LED_INIT();
-    xTaskCreatePinnedToCore(led_status_task, "led_status_task", 1024, NULL, 10, NULL, 1);
-    xTaskCreatePinnedToCore(led_mesh_task, "led_mesh_task", 1024, NULL, 10, NULL, 1);
-    xTaskCreatePinnedToCore(led_cc2530_task, "led_cc2530_task", 1024, NULL, 10, NULL, 1);
-
     /**
      * @brief Set the log level for serial port printing.
      */
     esp_log_level_set("*", ESP_LOG_INFO);
     esp_log_level_set(TAG, ESP_LOG_DEBUG);
+
+    ++boot_count;
+    ESP_LOGI(TAG, "Boot count: %d", boot_count);
+
+    // ESP_ERROR_CHECK(esp_netif_init());
+    tcpip_adapter_init();
+    MDF_ERROR_ASSERT(mdf_event_loop_init(event_loop_cb));
+    iv_18_init();
+    xTaskCreatePinnedToCore(timer, "timer", 1024, NULL, 2, NULL, 0);
+    xTaskCreatePinnedToCore(touch, "touch", 1024, NULL, 5, NULL, 0);
+    xTaskCreatePinnedToCore(iv_18, "iv_18", 1024, NULL, 2, NULL, 1);
+    // LED_INIT();
+    // xTaskCreatePinnedToCore(led_status_task, "led_status_task", 1024, NULL, 10, NULL, 1);
+    // xTaskCreatePinnedToCore(led_mesh_task, "led_mesh_task", 1024, NULL, 10, NULL, 1);
+    // xTaskCreatePinnedToCore(led_cc2530_task, "led_cc2530_task", 1024, NULL, 10, NULL, 1);
 
     UART_INIT();
     MDF_ERROR_ASSERT(wifi_init());
@@ -1446,5 +1794,5 @@ void app_main()
 
     xTaskCreatePinnedToCore(node_read_task, "node_read_task", 4 * 1024, NULL, 4, NULL, 0);
 
-    xTaskCreatePinnedToCore(uart1_rx_task, "uart1_rx_task", 1024 * 2, NULL, 5, NULL, 1);
+    xTaskCreatePinnedToCore(uart1_rx_task, "uart1_rx_task", 1024 * 2, NULL, 5, NULL, 0);
 }

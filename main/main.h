@@ -23,6 +23,13 @@
 #include <driver/dac.h>
 #include "driver/touch_pad.h"
 #include "driver/ledc.h"
+#include <string.h>
+#include <time.h>
+#include <sys/time.h>
+#include "esp_sntp.h"
+#include "esp_sleep.h"
+// #include "esp_netif.h"
+#include "tcpip_adapter.h"
 
 //#define BUF_SIZE (1024)
 #define VERSION "1.0.2"
@@ -35,7 +42,7 @@
 
 // #define CONFIG_ROUTER_SSID "a02test3"
 // #define CONFIG_ROUTER_PASSWORD "klyn3609"
-#define CONFIG_MESH_ID "000313"
+#define CONFIG_MESH_ID "000312"
 #define CONFIG_MESH_PASSWORD "19990312"
 #define CONFIG_SERVER_IP "esp.yaoboan.com"
 #define CONFIG_SERVER_PORT 28082
@@ -55,17 +62,27 @@
 
 #define RX_BUF_SIZE 1024
 
+#define LIGHT_GPIO 35
+#define BLINK_GPIO 25
+#define IV_18_DIN 12
+#define IV_18_CLK 27
+#define IV_18_LOAD 14
+#define IV_18_BLANK 26
+
+#define TOUCH1 TOUCH_PAD_NUM9
+#define TOUCH2 TOUCH_PAD_NUM8
+
 static void ota_task();
 
 static int socket_tcp_client_create(const char *ip, uint16_t port);
 static void tcp_client_read_task(void *arg);
-static void tcp_client_write_task(void *arg);
+// static void tcp_client_write_task(void *arg);
 
 static void root_read_task(void *arg);
 static void node_read_task(void *arg);
-static void node_write_task(void *arg);
+// static void node_write_task(void *arg);
 
-static void print_system_info_timercb(void *timer);
+// static void print_system_info_timercb(void *timer);
 static mdf_err_t wifi_init();
 static mdf_err_t event_loop_cb(mdf_event_loop_t event, void *ctx);
 
